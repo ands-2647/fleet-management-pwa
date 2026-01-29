@@ -1,96 +1,73 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 
+import Login from './pages/Login'
+import Vehicles from './pages/Vehicles'
+import Report from './pages/Report'
+import RegisterUsage from './pages/RegisterUsage'
+
+
 function App() {
-  const [vehicles, setVehicles] = useState([])
-  const [plate, setPlate] = useState('')
-  const [model, setModel] = useState('')
-  const [year, setYear] = useState('')
-
-  async function fetchVehicles() {
-    const { data, error } = await supabase
-      .from('vehicles')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (!error) {
-      setVehicles(data)
-    }
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-
-    if (!plate || !model || !year) {
-      alert('Preencha todos os campos')
-      return
-    }
-
-    const { error } = await supabase
-      .from('vehicles')
-      .insert([
-        {
-          plate,
-          model,
-          year: Number(year)
-        }
-      ])
-
-    if (error) {
-      console.error(error)
-      alert('Erro ao salvar veículo')
-    } else {
-      setPlate('')
-      setModel('')
-      setYear('')
-      fetchVehicles()
-    }
-  }
+  const [session, setSession] = useState(null)
+  const [profile, setProfile] = useState(null)
 
   useEffect(() => {
-    fetchVehicles()
+    // sessão inicial
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+    })
+
+    // mudanças de login/logout
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setProfile(null)
+    })
   }, [])
 
+  // buscar profile quando logar
+  useEffect(() => {
+    if (session?.user) {
+      supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .single()
+        .then(({ data }) => {
+          setProfile(data)
+        })
+    }
+  }, [session])
+
+  // não logado
+  if (!session) {
+    return <Login />
+  }
+
+  // logado, mas profile ainda carregando
+  if (!profile) {
+    return <p>Carregando perfil...</p>
+  }
+
   return (
-    <div style={{ padding: 20, maxWidth: 400 }}>
-      <h1>Cadastro de Veículos</h1>
+  <div style={{ padding: 20 }}>
+    <p>
+      Bem-vindo, {profile.name} ({profile.role})
+    </p>
 
-      <form onSubmit={handleSubmit}>
-        <input
-          placeholder="Placa"
-          value={plate}
-          onChange={e => setPlate(e.target.value)}
-        />
+    <button onClick={() => supabase.auth.signOut()}>
+      Sair
+    </button>
 
-        <input
-          placeholder="Modelo"
-          value={model}
-          onChange={e => setModel(e.target.value)}
-        />
+    {/* Registrar Saída (todos podem usar, inclusive chefia) */}
+    <RegisterUsage user={session.user} />
 
-        <input
-          placeholder="Ano"
-          type="number"
-          value={year}
-          onChange={e => setYear(e.target.value)}
-        />
+    {/* Relatório só para chefia */}
+    {profile.role !== 'motorista' && <Report />}
 
-        <button type="submit">Salvar</button>
-      </form>
-
-      <hr />
-
-      <h2>Veículos cadastrados</h2>
-
-      <ul>
-        {vehicles.map(v => (
-          <li key={v.id}>
-            {v.plate} — {v.model} ({v.year})
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
+    {/* Todos podem ver veículos (ajustamos depois) */}
+    <Vehicles />
+  </div>
+)
 }
 
 export default App
