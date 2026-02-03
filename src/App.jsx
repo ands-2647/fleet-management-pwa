@@ -10,6 +10,7 @@ import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
 import Maintenance from './pages/Maintenance'
 import VehicleConfig from './pages/VehicleConfig'
+import VehicleReport from './pages/VehicleReport'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -45,27 +46,23 @@ function App() {
     }
   }, [session])
 
-  if (!session) {
-    return <Login />
-  }
-
-  if (!profile) {
-    return <p>Carregando perfil...</p>
-  }
+  if (!session) return <Login />
+  if (!profile) return <p>Carregando perfil...</p>
 
   return (
     <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
       <header style={{ marginBottom: 20 }}>
         <p>
-          Bem-vindo, <strong>{profile.name}</strong> ({profile.role})
+          Bem-vindo, <strong>{profile.name}</strong>
         </p>
-
         <button onClick={() => supabase.auth.signOut()}>Sair</button>
       </header>
 
       <FleetStatus />
 
       <SmartReport profile={profile} />
+
+      <VehicleReport profile={profile} />
 
       <Maintenance profile={profile} />
 
