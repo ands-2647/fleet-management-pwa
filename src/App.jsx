@@ -5,26 +5,33 @@ import Login from './pages/Login'
 import Vehicles from './pages/Vehicles'
 import Report from './pages/Report'
 import RegisterUsage from './pages/RegisterUsage'
-
+import RegisterReturn from './pages/RegisterReturn'
+import FuelLog from './pages/FuelLog'
+import FleetStatus from './pages/FleetStatus'
 
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
 
+  // sessão inicial + escuta login/logout
   useEffect(() => {
-    // sessão inicial
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
     })
 
-    // mudanças de login/logout
-    supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setProfile(null)
-    })
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session)
+        setProfile(null)
+      }
+    )
+
+    return () => {
+      listener.subscription.unsubscribe()
+    }
   }, [])
 
-  // buscar profile quando logar
+  // buscar profile após login
   useEffect(() => {
     if (session?.user) {
       supabase
@@ -43,31 +50,40 @@ function App() {
     return <Login />
   }
 
-  // logado, mas profile ainda carregando
+  // logado mas profile ainda carregando
   if (!profile) {
     return <p>Carregando perfil...</p>
   }
 
   return (
-  <div style={{ padding: 20 }}>
-    <p>
-      Bem-vindo, {profile.name} ({profile.role})
-    </p>
+    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
+      <header style={{ marginBottom: 20 }}>
+        <p>
+          Bem-vindo, <strong>{profile.name}</strong> ({profile.role})
+        </p>
 
-    <button onClick={() => supabase.auth.signOut()}>
-      Sair
-    </button>
+        <button onClick={() => supabase.auth.signOut()}>Sair</button>
+      </header>
 
-    {/* Registrar Saída (todos podem usar, inclusive chefia) */}
-    <RegisterUsage user={session.user} />
+      {/* Painel de status da frota */}
+      <FleetStatus />
 
-    {/* Relatório só para chefia */}
-    {profile.role !== 'motorista' && <Report />}
+      {/* Registrar Saída */}
+      <RegisterUsage user={session.user} />
 
-    {/* Todos podem ver veículos (ajustamos depois) */}
-    <Vehicles />
-  </div>
-)
+      {/* Registrar Chegada */}
+      <RegisterReturn user={session.user} />
+
+      {/* Registrar Abastecimento */}
+      <FuelLog user={session.user} profile={profile} />
+
+      {/* Relatórios só para chefia */}
+      {profile.role !== 'motorista' && <Report />}
+
+      {/* Lista de veículos */}
+      <Vehicles />
+    </div>
+  )
 }
 
 export default App
