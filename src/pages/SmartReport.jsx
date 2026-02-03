@@ -43,13 +43,18 @@ function hoursDiffFromNow(dateISO) {
   return ms / 1000 / 60 / 60
 }
 
+function labelMedicao(measurementType) {
+  return measurementType === 'hours' ? 'Hora' : 'KM'
+}
+
 export default function SmartReport({ profile }) {
   const isManager = profile?.role !== 'motorista'
 
+  // Configuráveis
   const OPEN_USAGE_ALERT_HOURS = 24
-  const HIGH_COST_THRESHOLD = 2.5
+  const HIGH_COST_THRESHOLD = 2.5 // R$ por KM/Hora
 
-  const [rangeType, setRangeType] = useState('last_30')
+  const [rangeType, setRangeType] = useState('last_30') // last_7 | last_30 | month | custom
   const [monthBase, setMonthBase] = useState(startOfMonthISO())
   const [customStart, setCustomStart] = useState(
     isoDate(new Date(Date.now() - 6 * 86400000))
@@ -59,19 +64,29 @@ export default function SmartReport({ profile }) {
   const [rows, setRows] = useState([])
   const [openUsages, setOpenUsages] = useState([])
   const [userRows, setUserRows] = useState([])
+  const [maintenanceRows, setMaintenanceRows] = useState([])
   const [loading, setLoading] = useState(true)
 
   const { start, end } = useMemo(() => {
     const today = new Date()
     if (rangeType === 'last_7') {
-      return { start: isoDate(new Date(Date.now() - 6 * 86400000)), end: isoDate(today) }
+      return {
+        start: isoDate(new Date(Date.now() - 6 * 86400000)),
+        end: isoDate(today)
+      }
     }
     if (rangeType === 'last_30') {
-      return { start: isoDate(new Date(Date.now() - 29 * 86400000)), end: isoDate(today) }
+      return {
+        start: isoDate(new Date(Date.now() - 29 * 86400000)),
+        end: isoDate(today)
+      }
     }
     if (rangeType === 'month') {
       const base = new Date(monthBase)
-      return { start: startOfMonthISO(base), end: endOfMonthISO(base) }
+      return {
+        start: startOfMonthISO(base),
+        end: endOfMonthISO(base)
+      }
     }
     return { start: customStart, end: customEnd }
   }, [rangeType, monthBase, customStart, customEnd])
@@ -84,7 +99,12 @@ export default function SmartReport({ profile }) {
 
   async function fetchAll() {
     setLoading(true)
-    await Promise.all([fetchDailyKpis(), fetchOpenUsages(), fetchUserKpis()])
+    await Promise.all([
+      fetchDailyKpis(),
+      fetchOpenUsages(),
+      fetchUserKpis(),
+      fetchMaintenanceStatus()
+    ])
     setLoading(false)
   }
 
@@ -109,7 +129,9 @@ export default function SmartReport({ profile }) {
   async function fetchUserKpis() {
     const { data, error } = await supabase
       .from('v_user_daily_kpis')
-      .select('user_id, name, role, day, fuel_spend, fuel_events, usage_total, trips_finished')
+      .select(
+        'user_id, name, role, day, fuel_spend, fuel_events, usage_total, trips_finished'
+      )
       .gte('day', start)
       .lte('day', end)
       .order('day', { ascending: true })
@@ -125,7 +147,9 @@ export default function SmartReport({ profile }) {
   async function fetchOpenUsages() {
     const { data, error } = await supabase
       .from('usage_logs')
-      .select('id, vehicle_id, user_id, date, start_value, created_at')
+      .select(
+        'id, vehicle_id, user_id, date, start_value, created_at, destination, fuel_level_start'
+      )
       .is('end_value', null)
       .order('created_at', { ascending: false })
 
@@ -152,9 +176,32 @@ export default function SmartReport({ profile }) {
       }
     }
 
-    setOpenUsages(open.map(u => ({ ...u, profile: profilesMap[u.user_id] || null })))
+    setOpenUsages(
+      open.map(u => ({
+        ...u,
+        profile: profilesMap[u.user_id] || null
+      }))
+    )
   }
 
+  async function fetchMaintenanceStatus() {
+    const { data, error } = await supabase
+      .from('v_maintenance_status')
+      .select(
+        'vehicle_id, plate, model, measurement_type, current_value, last_service_value, last_service_date, interval_value, remind_before, next_due_value, remaining, status'
+      )
+      .order('status', { ascending: true })
+      .order('remaining', { ascending: true })
+
+    if (error) {
+      console.error('v_maintenance_status error:', error)
+      setMaintenanceRows([])
+    } else {
+      setMaintenanceRows(data || [])
+    }
+  }
+
+  // --------- AGREGAÇÃO POR VEÍCULO (período) ----------
   const byVehicle = useMemo(() => {
     const map = new Map()
     for (const r of rows) {
@@ -181,6 +228,7 @@ export default function SmartReport({ profile }) {
     return Array.from(map.values())
   }, [rows])
 
+  // --------- AGREGAÇÃO POR USUÁRIO (período) ----------
   const byUser = useMemo(() => {
     const map = new Map()
     for (const r of userRows) {
@@ -215,6 +263,7 @@ export default function SmartReport({ profile }) {
     return { fuel, events, usage, trips, costPerUnit }
   }, [byVehicle])
 
+  // --------- TOP 5 ----------
   const top5Fuel = useMemo(
     () => [...byVehicle].sort((a, b) => b.fuel_spend - a.fuel_spend).slice(0, 5),
     [byVehicle]
@@ -240,25 +289,11 @@ export default function SmartReport({ profile }) {
     [byUser]
   )
 
-  const chartFuel = useMemo(() => {
-    return [...byVehicle]
-      .sort((a, b) => b.fuel_spend - a.fuel_spend)
-      .map(r => ({ name: r.plate, gasto: Number(r.fuel_spend.toFixed(2)) }))
-  }, [byVehicle])
-
-  const chartUsage = useMemo(() => {
-    return [...byVehicle]
-      .sort((a, b) => b.usage_total - a.usage_total)
-      .map(r => ({ name: r.plate, uso: Number(r.usage_total.toFixed(2)) }))
-  }, [byVehicle])
-
-  function labelMedicao(measurementType) {
-    return measurementType === 'hours' ? 'Hora' : 'KM'
-  }
-
+  // --------- ALERTAS GERAIS (uso/consumo/registro) ----------
   const alerts = useMemo(() => {
     const a = []
 
+    // Uso aberto há mais de X horas
     for (const u of openUsages) {
       const h = hoursDiffFromNow(u.created_at)
       if (h >= OPEN_USAGE_ALERT_HOURS) {
@@ -270,6 +305,7 @@ export default function SmartReport({ profile }) {
       }
     }
 
+    // Abasteceu no período e não teve viagem finalizada
     for (const v of byVehicle) {
       if (v.fuel_events > 0 && v.trips_finished === 0) {
         a.push({
@@ -279,6 +315,7 @@ export default function SmartReport({ profile }) {
       }
     }
 
+    // Teve uso no período mas nenhum abastecimento
     for (const v of byVehicle) {
       if (v.trips_finished > 0 && v.fuel_events === 0) {
         a.push({
@@ -288,6 +325,7 @@ export default function SmartReport({ profile }) {
       }
     }
 
+    // Custo alto (R$/KM ou R$/Hora)
     for (const v of byVehicle) {
       if (v.usage_total > 0) {
         const cost = v.fuel_spend / v.usage_total
@@ -303,6 +341,30 @@ export default function SmartReport({ profile }) {
 
     return a
   }, [openUsages, byVehicle])
+
+  // --------- ALERTAS DE MANUTENÇÃO ----------
+  const maintenanceLate = useMemo(
+    () => maintenanceRows.filter(r => r.status === 'atrasado'),
+    [maintenanceRows]
+  )
+
+  const maintenanceSoon = useMemo(
+    () => maintenanceRows.filter(r => r.status === 'proximo'),
+    [maintenanceRows]
+  )
+
+  // --------- GRÁFICOS ----------
+  const chartFuel = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.fuel_spend - a.fuel_spend)
+      .map(r => ({ name: r.plate, gasto: Number(r.fuel_spend.toFixed(2)) }))
+  }, [byVehicle])
+
+  const chartUsage = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.usage_total - a.usage_total)
+      .map(r => ({ name: r.plate, uso: Number(r.usage_total.toFixed(2)) }))
+  }, [byVehicle])
 
   if (!isManager) {
     return (
@@ -330,7 +392,11 @@ export default function SmartReport({ profile }) {
         {rangeType === 'month' && (
           <>
             <label style={{ fontSize: 13, color: '#555' }}>Escolha um dia do mês</label>
-            <input type="date" value={monthBase} onChange={e => setMonthBase(e.target.value)} />
+            <input
+              type="date"
+              value={monthBase}
+              onChange={e => setMonthBase(e.target.value)}
+            />
           </>
         )}
 
@@ -338,11 +404,19 @@ export default function SmartReport({ profile }) {
           <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr' }}>
             <div>
               <label style={{ fontSize: 13, color: '#555' }}>Início</label>
-              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+              <input
+                type="date"
+                value={customStart}
+                onChange={e => setCustomStart(e.target.value)}
+              />
             </div>
             <div>
               <label style={{ fontSize: 13, color: '#555' }}>Fim</label>
-              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              <input
+                type="date"
+                value={customEnd}
+                onChange={e => setCustomEnd(e.target.value)}
+              />
             </div>
           </div>
         )}
@@ -356,6 +430,7 @@ export default function SmartReport({ profile }) {
         <p style={{ marginTop: 12 }}>Carregando...</p>
       ) : (
         <>
+          {/* Cards resumo */}
           <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
             <div style={card}>
               <strong>Gasto total combustível (R$)</strong>
@@ -381,13 +456,51 @@ export default function SmartReport({ profile }) {
               <strong>Custo estimado (R$ por KM/Hora)</strong>
               <span>{totals.usage > 0 ? totals.costPerUnit.toFixed(2) : '—'}</span>
             </div>
+
+            <div style={card}>
+              <strong>Manutenção atrasada</strong>
+              <span>{maintenanceLate.length}</span>
+            </div>
+
+            <div style={card}>
+              <strong>Manutenção próxima</strong>
+              <span>{maintenanceSoon.length}</span>
+            </div>
           </div>
 
+          {/* ALERTAS DE MANUTENÇÃO */}
+          <h3 style={{ marginTop: 24 }}>Alertas de manutenção</h3>
+
+          {maintenanceLate.length === 0 && maintenanceSoon.length === 0 ? (
+            <p>Nenhum alerta de manutenção ✅</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {maintenanceLate.map(r => (
+                <div key={`late-${r.vehicle_id}`} style={alertBox}>
+                  <strong>Atrasado:</strong> {r.plate} — {r.model} •{' '}
+                  <strong>{Math.abs(Number(r.remaining).toFixed(0))}</strong>{' '}
+                  {labelMedicao(r.measurement_type)} atrasado.
+                </div>
+              ))}
+
+              {maintenanceSoon.map(r => (
+                <div key={`soon-${r.vehicle_id}`} style={alertBox}>
+                  <strong>Próximo:</strong> {r.plate} — {r.model} • faltam{' '}
+                  <strong>{Number(r.remaining).toFixed(0)}</strong>{' '}
+                  {labelMedicao(r.measurement_type)}.
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* TOP 5 veículos */}
           <h3 style={{ marginTop: 24 }}>Top 5 veículos por gasto</h3>
           <div style={{ display: 'grid', gap: 10 }}>
             {top5Fuel.map(v => (
               <div key={v.vehicle_id} style={card}>
-                <strong>{v.plate} — {v.model}</strong>
+                <strong>
+                  {v.plate} — {v.model}
+                </strong>
                 <span>R$ {v.fuel_spend.toFixed(2)}</span>
               </div>
             ))}
@@ -397,12 +510,15 @@ export default function SmartReport({ profile }) {
           <div style={{ display: 'grid', gap: 10 }}>
             {top5Usage.map(v => (
               <div key={v.vehicle_id} style={card}>
-                <strong>{v.plate} — {v.model}</strong>
+                <strong>
+                  {v.plate} — {v.model}
+                </strong>
                 <span>{v.usage_total.toFixed(2)}</span>
               </div>
             ))}
           </div>
 
+          {/* TOP motoristas */}
           <h3 style={{ marginTop: 24 }}>Top motoristas (período)</h3>
           <div style={{ display: 'grid', gap: 10 }}>
             <div style={alertBox}>
@@ -442,7 +558,8 @@ export default function SmartReport({ profile }) {
             </div>
           </div>
 
-          <h3 style={{ marginTop: 24 }}>Alertas</h3>
+          {/* Alertas gerais */}
+          <h3 style={{ marginTop: 24 }}>Alertas gerais</h3>
           {alerts.length === 0 ? (
             <p>Nenhum alerta no momento ✅</p>
           ) : (
@@ -455,6 +572,7 @@ export default function SmartReport({ profile }) {
             </div>
           )}
 
+          {/* Gráficos */}
           <h3 style={{ marginTop: 24 }}>Gasto por veículo</h3>
           <div style={{ width: '100%', height: 260 }}>
             <ResponsiveContainer>
