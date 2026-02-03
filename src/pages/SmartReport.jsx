@@ -19,6 +19,13 @@ const card = {
   fontSize: 16
 }
 
+const alertBox = {
+  border: '1px solid #ffd18b',
+  background: '#fff7e6',
+  borderRadius: 10,
+  padding: 12
+}
+
 function isoDate(d) {
   return new Date(d).toISOString().slice(0, 10)
 }
@@ -31,15 +38,27 @@ function endOfMonthISO(date = new Date()) {
   return isoDate(new Date(date.getFullYear(), date.getMonth() + 1, 0))
 }
 
+function hoursDiffFromNow(dateISO) {
+  const ms = Date.now() - new Date(dateISO).getTime()
+  return ms / 1000 / 60 / 60
+}
+
 export default function SmartReport({ profile }) {
   const isManager = profile?.role !== 'motorista'
 
+  // Configuráveis (depois a gente vira “Config do Gestor”)
+  const OPEN_USAGE_ALERT_HOURS = 24
+  const HIGH_COST_THRESHOLD = 2.5 // R$ por KM/Hora (ajuste depois)
+
   const [rangeType, setRangeType] = useState('last_30') // last_7 | last_30 | month | custom
-  const [monthBase, setMonthBase] = useState(startOfMonthISO()) // usado quando rangeType = month
-  const [customStart, setCustomStart] = useState(isoDate(new Date(Date.now() - 6 * 86400000)))
+  const [monthBase, setMonthBase] = useState(startOfMonthISO())
+  const [customStart, setCustomStart] = useState(
+    isoDate(new Date(Date.now() - 6 * 86400000))
+  )
   const [customEnd, setCustomEnd] = useState(isoDate(new Date()))
 
   const [rows, setRows] = useState([])
+  const [openUsages, setOpenUsages] = useState([])
   const [loading, setLoading] = useState(true)
 
   const { start, end } = useMemo(() => {
@@ -58,24 +77,24 @@ export default function SmartReport({ profile }) {
     }
     if (rangeType === 'month') {
       const base = new Date(monthBase)
-      return {
-        start: startOfMonthISO(base),
-        end: endOfMonthISO(base)
-      }
+      return { start: startOfMonthISO(base), end: endOfMonthISO(base) }
     }
-    // custom
     return { start: customStart, end: customEnd }
   }, [rangeType, monthBase, customStart, customEnd])
 
   useEffect(() => {
     if (!isManager) return
-    fetchData()
+    fetchAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end, isManager])
 
-  async function fetchData() {
+  async function fetchAll() {
     setLoading(true)
+    await Promise.all([fetchDailyKpis(), fetchOpenUsages()])
+    setLoading(false)
+  }
 
+  async function fetchDailyKpis() {
     const { data, error } = await supabase
       .from('v_vehicle_daily_kpis')
       .select(
@@ -86,13 +105,52 @@ export default function SmartReport({ profile }) {
       .order('day', { ascending: true })
 
     if (error) {
-      console.error(error)
+      console.error('v_vehicle_daily_kpis error:', error)
       setRows([])
     } else {
       setRows(data || [])
     }
+  }
 
-    setLoading(false)
+  async function fetchOpenUsages() {
+    // usos abertos (end_value NULL)
+    const { data, error } = await supabase
+      .from('usage_logs')
+      .select(
+        'id, vehicle_id, user_id, date, start_value, created_at, destination, fuel_level_start'
+      )
+      .is('end_value', null)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('open usage error:', error)
+      setOpenUsages([])
+      return
+    }
+
+    const open = data || []
+    const userIds = [...new Set(open.map(u => u.user_id).filter(Boolean))]
+
+    let profilesMap = {}
+    if (userIds.length > 0) {
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('id, name, role')
+        .in('id', userIds)
+
+      if (profErr) {
+        console.error('profiles map error:', profErr)
+      } else {
+        profilesMap = Object.fromEntries((prof || []).map(p => [p.id, p]))
+      }
+    }
+
+    setOpenUsages(
+      open.map(u => ({
+        ...u,
+        profile: profilesMap[u.user_id] || null
+      }))
+    )
   }
 
   // Agrupa por veículo (somando dentro do período)
@@ -119,7 +177,7 @@ export default function SmartReport({ profile }) {
       agg.usage_total += Number(r.usage_total || 0)
       agg.trips_finished += Number(r.trips_finished || 0)
     }
-    return Array.from(map.values()).sort((a, b) => b.fuel_spend - a.fuel_spend)
+    return Array.from(map.values())
   }, [rows])
 
   const totals = useMemo(() => {
@@ -131,27 +189,88 @@ export default function SmartReport({ profile }) {
     return { fuel, events, usage, trips, costPerUnit }
   }, [byVehicle])
 
-  const chartFuel = useMemo(
-    () =>
-      byVehicle.map(r => ({
-        name: r.plate,
-        gasto: Number(r.fuel_spend.toFixed(2))
-      })),
-    [byVehicle]
-  )
+  const top5Fuel = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.fuel_spend - a.fuel_spend)
+      .slice(0, 5)
+  }, [byVehicle])
 
-  const chartUsage = useMemo(
-    () =>
-      byVehicle.map(r => ({
-        name: r.plate,
-        uso: Number(r.usage_total.toFixed(2))
-      })),
-    [byVehicle]
-  )
+  const top5Usage = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.usage_total - a.usage_total)
+      .slice(0, 5)
+  }, [byVehicle])
+
+  const chartFuel = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.fuel_spend - a.fuel_spend)
+      .map(r => ({ name: r.plate, gasto: Number(r.fuel_spend.toFixed(2)) }))
+  }, [byVehicle])
+
+  const chartUsage = useMemo(() => {
+    return [...byVehicle]
+      .sort((a, b) => b.usage_total - a.usage_total)
+      .map(r => ({ name: r.plate, uso: Number(r.usage_total.toFixed(2)) }))
+  }, [byVehicle])
 
   function labelMedicao(measurementType) {
     return measurementType === 'hours' ? 'Hora' : 'KM'
   }
+
+  // ALERTAS
+  const alerts = useMemo(() => {
+    const a = []
+
+    // 1) usos abertos há mais de X horas
+    for (const u of openUsages) {
+      const h = hoursDiffFromNow(u.created_at)
+      if (h >= OPEN_USAGE_ALERT_HOURS) {
+        const who = u.profile?.name ? `${u.profile.name}` : 'Usuário'
+        a.push({
+          type: 'Uso aberto',
+          message: `Uso aberto há ${Math.floor(h)}h (veículo ${u.vehicle_id}). ${who} — saída ${u.start_value} em ${u.date}.`
+        })
+      }
+    }
+
+    // 2) abasteceu no período e não teve viagem finalizada
+    for (const v of byVehicle) {
+      if (v.fuel_events > 0 && v.trips_finished === 0) {
+        a.push({
+          type: 'Possível falta de registro',
+          message: `${v.plate}: teve abastecimento no período, mas 0 viagens finalizadas. Pode ter faltado registrar chegada.`
+        })
+      }
+    }
+
+    // 3) teve uso no período mas nenhum abastecimento
+    for (const v of byVehicle) {
+      if (v.trips_finished > 0 && v.fuel_events === 0) {
+        a.push({
+          type: 'Sem abastecimento',
+          message: `${v.plate}: teve uso no período, mas nenhum abastecimento registrado. (Pode estar ok, mas vale conferir.)`
+        })
+      }
+    }
+
+    // 4) custo alto (R$/KM ou R$/Hora)
+    for (const v of byVehicle) {
+      if (v.usage_total > 0) {
+        const cost = v.fuel_spend / v.usage_total
+        if (cost >= HIGH_COST_THRESHOLD) {
+          const unit = labelMedicao(v.measurement_type)
+          a.push({
+            type: 'Custo alto',
+            message: `${v.plate}: custo estimado ${cost.toFixed(
+              2
+            )} R$/${unit} no período (acima de ${HIGH_COST_THRESHOLD}).`
+          })
+        }
+      }
+    }
+
+    return a
+  }, [openUsages, byVehicle])
 
   if (!isManager) {
     return (
@@ -169,10 +288,7 @@ export default function SmartReport({ profile }) {
       <div style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
         <label style={{ fontSize: 13, color: '#555' }}>Período</label>
 
-        <select
-          value={rangeType}
-          onChange={e => setRangeType(e.target.value)}
-        >
+        <select value={rangeType} onChange={e => setRangeType(e.target.value)}>
           <option value="last_7">Últimos 7 dias</option>
           <option value="last_30">Últimos 30 dias</option>
           <option value="month">Mês (selecionar)</option>
@@ -181,7 +297,9 @@ export default function SmartReport({ profile }) {
 
         {rangeType === 'month' && (
           <>
-            <label style={{ fontSize: 13, color: '#555' }}>Escolha um dia do mês</label>
+            <label style={{ fontSize: 13, color: '#555' }}>
+              Escolha um dia do mês
+            </label>
             <input
               type="date"
               value={monthBase}
@@ -191,7 +309,13 @@ export default function SmartReport({ profile }) {
         )}
 
         {rangeType === 'custom' && (
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr' }}>
+          <div
+            style={{
+              display: 'grid',
+              gap: 10,
+              gridTemplateColumns: '1fr 1fr'
+            }}
+          >
             <div>
               <label style={{ fontSize: 13, color: '#555' }}>Início</label>
               <input
@@ -220,6 +344,7 @@ export default function SmartReport({ profile }) {
         <p style={{ marginTop: 12 }}>Carregando...</p>
       ) : (
         <>
+          {/* Cards resumo */}
           <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
             <div style={card}>
               <strong>Gasto total combustível (R$)</strong>
@@ -243,12 +368,50 @@ export default function SmartReport({ profile }) {
 
             <div style={card}>
               <strong>Custo estimado (R$ por KM/Hora)</strong>
-              <span>
-                {totals.usage > 0 ? totals.costPerUnit.toFixed(2) : '—'}
-              </span>
+              <span>{totals.usage > 0 ? totals.costPerUnit.toFixed(2) : '—'}</span>
             </div>
           </div>
 
+          {/* TOP 5 */}
+          <h3 style={{ marginTop: 24 }}>Top 5 veículos por gasto</h3>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {top5Fuel.map(v => (
+              <div key={v.vehicle_id} style={card}>
+                <strong>
+                  {v.plate} — {v.model}
+                </strong>
+                <span>R$ {v.fuel_spend.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+
+          <h3 style={{ marginTop: 24 }}>Top 5 veículos por uso (KM/Horas)</h3>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {top5Usage.map(v => (
+              <div key={v.vehicle_id} style={card}>
+                <strong>
+                  {v.plate} — {v.model}
+                </strong>
+                <span>{v.usage_total.toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* ALERTAS */}
+          <h3 style={{ marginTop: 24 }}>Alertas</h3>
+          {alerts.length === 0 ? (
+            <p>Nenhum alerta no momento ✅</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {alerts.map((a, idx) => (
+                <div key={idx} style={alertBox}>
+                  <strong>{a.type}:</strong> {a.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Gráficos */}
           <h3 style={{ marginTop: 24 }}>Gasto por veículo</h3>
           <div style={{ width: '100%', height: 260 }}>
             <ResponsiveContainer>
@@ -273,6 +436,7 @@ export default function SmartReport({ profile }) {
             </ResponsiveContainer>
           </div>
 
+          {/* Tabela detalhada */}
           <h3 style={{ marginTop: 24 }}>Tabela detalhada</h3>
           <div style={{ overflowX: 'auto' }}>
             <table
@@ -310,25 +474,44 @@ export default function SmartReport({ profile }) {
                 </tr>
               </thead>
               <tbody>
-                {byVehicle.map(r => {
-                  const unit = labelMedicao(r.measurement_type)
-                  const cost = r.usage_total > 0 ? r.fuel_spend / r.usage_total : null
-                  return (
-                    <tr key={r.vehicle_id}>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.plate}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.model}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.type || '—'}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{unit}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.fuel_spend.toFixed(2)}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.fuel_events}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.usage_total.toFixed(2)}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>{r.trips_finished}</td>
-                      <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
-                        {cost !== null ? cost.toFixed(2) : '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
+                {[...byVehicle]
+                  .sort((a, b) => b.fuel_spend - a.fuel_spend)
+                  .map(r => {
+                    const unit = labelMedicao(r.measurement_type)
+                    const cost =
+                      r.usage_total > 0 ? r.fuel_spend / r.usage_total : null
+                    return (
+                      <tr key={r.vehicle_id}>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.plate}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.model}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.type || '—'}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {unit}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.fuel_spend.toFixed(2)}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.fuel_events}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.usage_total.toFixed(2)}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {r.trips_finished}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
+                          {cost !== null ? cost.toFixed(2) : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
               </tbody>
             </table>
           </div>
