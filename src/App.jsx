@@ -3,11 +3,11 @@ import { supabase } from './lib/supabase'
 
 import Login from './pages/Login'
 import Vehicles from './pages/Vehicles'
-import Report from './pages/Report'
 import RegisterUsage from './pages/RegisterUsage'
 import RegisterReturn from './pages/RegisterReturn'
 import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
+import SmartReport from './pages/SmartReport'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -62,11 +62,16 @@ function App() {
           Bem-vindo, <strong>{profile.name}</strong> ({profile.role})
         </p>
 
-        <button onClick={() => supabase.auth.signOut()}>Sair</button>
+        <button onClick={() => supabase.auth.signOut()}>
+          Sair
+        </button>
       </header>
 
-      {/* Painel de status da frota */}
+      {/* Status geral da frota */}
       <FleetStatus />
+
+      {/* Relatórios inteligentes */}
+      <SmartReport profile={profile} />
 
       {/* Registrar Saída */}
       <RegisterUsage user={session.user} />
@@ -76,9 +81,6 @@ function App() {
 
       {/* Registrar Abastecimento */}
       <FuelLog user={session.user} profile={profile} />
-
-      {/* Relatórios só para chefia */}
-      {profile.role !== 'motorista' && <Report />}
 
       {/* Lista de veículos */}
       <Vehicles />
