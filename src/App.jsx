@@ -8,6 +8,7 @@ import RegisterReturn from './pages/RegisterReturn'
 import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
+import Maintenance from './pages/Maintenance'
 
 function App() {
   const [session, setSession] = useState(null)
@@ -72,6 +73,9 @@ function App() {
 
       {/* Relatórios inteligentes */}
       <SmartReport profile={profile} />
+
+      {/* Manutenção automática (somente chefia) */}
+      <Maintenance profile={profile} />
 
       {/* Registrar Saída */}
       <RegisterUsage user={session.user} />
