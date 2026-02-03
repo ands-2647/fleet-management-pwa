@@ -15,6 +15,15 @@ const card = {
   gap: 8
 }
 
+const rowLine = {
+  display: 'grid',
+  gridTemplateColumns: '140px 1fr 120px',
+  gap: 10,
+  alignItems: 'center',
+  padding: '10px 0',
+  borderBottom: '1px solid #ddd'
+}
+
 function unitLabel(measurementType) {
   return measurementType === 'hours' ? 'Horas' : 'KM'
 }
@@ -43,6 +52,10 @@ export default function VehicleConfig({ profile }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
+  // Histórico de manutenções
+  const [serviceLogs, setServiceLogs] = useState([])
+  const [logsLoading, setLogsLoading] = useState(false)
+
   // form veículo
   const [plate, setPlate] = useState('')
   const [model, setModel] = useState('')
@@ -69,9 +82,11 @@ export default function VehicleConfig({ profile }) {
   useEffect(() => {
     if (!vehicleId) {
       setRow(null)
+      setServiceLogs([])
       return
     }
     fetchConfig(vehicleId)
+    fetchServiceLogs(vehicleId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vehicleId])
 
@@ -122,10 +137,29 @@ export default function VehicleConfig({ profile }) {
     setPlanActive(data.plan_active != null ? Boolean(data.plan_active) : true)
     setPlanNotes(data.plan_notes || '')
 
+    // limpar inputs de manutenção
     setServiceValue('')
     setServiceNotes('')
 
     setLoading(false)
+  }
+
+  async function fetchServiceLogs(vId) {
+    setLogsLoading(true)
+    const { data, error } = await supabase
+      .from('maintenance_logs')
+      .select('id, performed_at, value_at_service, notes, created_at')
+      .eq('vehicle_id', vId)
+      .order('performed_at', { ascending: false })
+      .limit(50)
+
+    if (error) {
+      console.error(error)
+      setServiceLogs([])
+    } else {
+      setServiceLogs(data || [])
+    }
+    setLogsLoading(false)
   }
 
   const unit = useMemo(() => unitLabel(measurementType), [measurementType])
@@ -136,18 +170,12 @@ export default function VehicleConfig({ profile }) {
 
     setSaving(true)
 
-    // Atualiza dados do veículo
-    // Obs: esse update inclui notes (se você rodou o SQL do notes)
     const updatePayload = {
       plate,
       model,
       type,
-      measurement_type: measurementType
-    }
-
-    // só inclui notes se a coluna existir (evita erro se você não criou)
-    if (typeof vehicleNotes === 'string') {
-      updatePayload.notes = vehicleNotes
+      measurement_type: measurementType,
+      notes: vehicleNotes
     }
 
     const { error } = await supabase
@@ -236,6 +264,31 @@ export default function VehicleConfig({ profile }) {
     setServiceValue('')
     setServiceNotes('')
     fetchConfig(vehicleId)
+    fetchServiceLogs(vehicleId)
+  }
+
+  // opcional: apagar um log lançado errado
+  async function deleteLog(logId) {
+    const ok = window.confirm('Tem certeza que deseja excluir este registro?')
+    if (!ok) return
+
+    setSaving(true)
+    const { error } = await supabase
+      .from('maintenance_logs')
+      .delete()
+      .eq('id', logId)
+
+    setSaving(false)
+
+    if (error) {
+      console.error(error)
+      alert(error.message || 'Erro ao excluir registro')
+      return
+    }
+
+    alert('Registro excluído ✅')
+    fetchConfig(vehicleId)
+    fetchServiceLogs(vehicleId)
   }
 
   if (!isManager) {
@@ -281,7 +334,8 @@ export default function VehicleConfig({ profile }) {
                 </div>
 
                 <div style={{ fontSize: 13, color: '#555' }}>
-                  Última manutenção: {row?.last_service_date || '—'} • valor: {Number(row?.last_service_value || 0).toFixed(0)} {unit}
+                  Última manutenção: {row?.last_service_date || '—'} • valor:{' '}
+                  {Number(row?.last_service_value || 0).toFixed(0)} {unit}
                 </div>
               </div>
 
@@ -395,6 +449,51 @@ export default function VehicleConfig({ profile }) {
                       {saving ? 'Registrando...' : 'Registrar manutenção'}
                     </button>
                   </form>
+                </div>
+
+                {/* HISTÓRICO */}
+                <div style={card}>
+                  <h3 style={{ margin: 0 }}>Histórico de manutenções</h3>
+
+                  {logsLoading ? (
+                    <p>Carregando histórico...</p>
+                  ) : serviceLogs.length === 0 ? (
+                    <p>Nenhuma manutenção registrada ainda.</p>
+                  ) : (
+                    <div>
+                      <div style={{ ...rowLine, fontWeight: 'bold' }}>
+                        <div>Data</div>
+                        <div>Observação</div>
+                        <div style={{ textAlign: 'right' }}>Valor</div>
+                      </div>
+
+                      {serviceLogs.map(l => (
+                        <div key={l.id} style={rowLine}>
+                          <div>{l.performed_at}</div>
+                          <div style={{ color: '#444' }}>
+                            {l.notes || <span style={{ color: '#888' }}>—</span>}
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <strong>{Number(l.value_at_service).toFixed(0)}</strong> {unit}
+
+                            <div>
+                              <button
+                                onClick={() => deleteLog(l.id)}
+                                disabled={saving}
+                                style={{
+                                  marginTop: 6,
+                                  fontSize: 12,
+                                  padding: '4px 8px'
+                                }}
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </>
