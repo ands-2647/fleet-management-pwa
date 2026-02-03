@@ -17,7 +17,7 @@ const card = {
 
 const rowLine = {
   display: 'grid',
-  gridTemplateColumns: '140px 1fr 120px',
+  gridTemplateColumns: '140px 1fr 140px',
   gap: 10,
   alignItems: 'center',
   padding: '10px 0',
@@ -56,6 +56,12 @@ export default function VehicleConfig({ profile }) {
   const [serviceLogs, setServiceLogs] = useState([])
   const [logsLoading, setLogsLoading] = useState(false)
 
+  // edição inline (histórico)
+  const [editLogId, setEditLogId] = useState(null)
+  const [editDate, setEditDate] = useState('')
+  const [editValue, setEditValue] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+
   // form veículo
   const [plate, setPlate] = useState('')
   const [model, setModel] = useState('')
@@ -83,6 +89,7 @@ export default function VehicleConfig({ profile }) {
     if (!vehicleId) {
       setRow(null)
       setServiceLogs([])
+      cancelEdit()
       return
     }
     fetchConfig(vehicleId)
@@ -263,11 +270,11 @@ export default function VehicleConfig({ profile }) {
     alert('Manutenção registrada ✅')
     setServiceValue('')
     setServiceNotes('')
+    cancelEdit()
     fetchConfig(vehicleId)
     fetchServiceLogs(vehicleId)
   }
 
-  // opcional: apagar um log lançado errado
   async function deleteLog(logId) {
     const ok = window.confirm('Tem certeza que deseja excluir este registro?')
     if (!ok) return
@@ -287,6 +294,54 @@ export default function VehicleConfig({ profile }) {
     }
 
     alert('Registro excluído ✅')
+    cancelEdit()
+    fetchConfig(vehicleId)
+    fetchServiceLogs(vehicleId)
+  }
+
+  function startEdit(log) {
+    setEditLogId(log.id)
+    setEditDate(log.performed_at || '')
+    setEditValue(String(log.value_at_service ?? ''))
+    setEditNotes(log.notes || '')
+  }
+
+  function cancelEdit() {
+    setEditLogId(null)
+    setEditDate('')
+    setEditValue('')
+    setEditNotes('')
+  }
+
+  async function saveEdit() {
+    if (!editLogId) return
+
+    if (!editDate || !editValue) {
+      alert('Preencha a data e o valor.')
+      return
+    }
+
+    setSaving(true)
+
+    const { error } = await supabase
+      .from('maintenance_logs')
+      .update({
+        performed_at: editDate,
+        value_at_service: Number(editValue),
+        notes: editNotes || null
+      })
+      .eq('id', editLogId)
+
+    setSaving(false)
+
+    if (error) {
+      console.error(error)
+      alert(error.message || 'Erro ao salvar edição')
+      return
+    }
+
+    alert('Registro atualizado ✅')
+    cancelEdit()
     fetchConfig(vehicleId)
     fetchServiceLogs(vehicleId)
   }
@@ -467,31 +522,92 @@ export default function VehicleConfig({ profile }) {
                         <div style={{ textAlign: 'right' }}>Valor</div>
                       </div>
 
-                      {serviceLogs.map(l => (
-                        <div key={l.id} style={rowLine}>
-                          <div>{l.performed_at}</div>
-                          <div style={{ color: '#444' }}>
-                            {l.notes || <span style={{ color: '#888' }}>—</span>}
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <strong>{Number(l.value_at_service).toFixed(0)}</strong> {unit}
+                      {serviceLogs.map(l => {
+                        const isEditing = editLogId === l.id
 
+                        return (
+                          <div key={l.id} style={rowLine}>
+                            {/* COLUNA DATA */}
                             <div>
-                              <button
-                                onClick={() => deleteLog(l.id)}
-                                disabled={saving}
-                                style={{
-                                  marginTop: 6,
-                                  fontSize: 12,
-                                  padding: '4px 8px'
-                                }}
-                              >
-                                Excluir
-                              </button>
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editDate}
+                                  onChange={e => setEditDate(e.target.value)}
+                                />
+                              ) : (
+                                l.performed_at
+                              )}
+                            </div>
+
+                            {/* COLUNA OBS */}
+                            <div style={{ color: '#444' }}>
+                              {isEditing ? (
+                                <input
+                                  placeholder="Observação"
+                                  value={editNotes}
+                                  onChange={e => setEditNotes(e.target.value)}
+                                />
+                              ) : (
+                                l.notes || <span style={{ color: '#888' }}>—</span>
+                              )}
+                            </div>
+
+                            {/* COLUNA VALOR + AÇÕES */}
+                            <div style={{ textAlign: 'right' }}>
+                              {isEditing ? (
+                                <>
+                                  <input
+                                    type="number"
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    placeholder={`Valor (${unit})`}
+                                    style={{ width: '100%', marginBottom: 6 }}
+                                  />
+                                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                    <button
+                                      onClick={saveEdit}
+                                      disabled={saving}
+                                      style={{ fontSize: 12, padding: '4px 8px' }}
+                                    >
+                                      Salvar
+                                    </button>
+                                    <button
+                                      onClick={cancelEdit}
+                                      disabled={saving}
+                                      style={{ fontSize: 12, padding: '4px 8px' }}
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div>
+                                    <strong>{Number(l.value_at_service).toFixed(0)}</strong> {unit}
+                                  </div>
+                                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+                                    <button
+                                      onClick={() => startEdit(l)}
+                                      disabled={saving}
+                                      style={{ fontSize: 12, padding: '4px 8px' }}
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      onClick={() => deleteLog(l.id)}
+                                      disabled={saving}
+                                      style={{ fontSize: 12, padding: '4px 8px' }}
+                                    >
+                                      Excluir
+                                    </button>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
