@@ -9,12 +9,12 @@ import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
 import Maintenance from './pages/Maintenance'
+import VehicleConfig from './pages/VehicleConfig'
 
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
 
-  // sessão inicial + escuta login/logout
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
@@ -32,7 +32,6 @@ function App() {
     }
   }, [])
 
-  // buscar profile após login
   useEffect(() => {
     if (session?.user) {
       supabase
@@ -46,12 +45,10 @@ function App() {
     }
   }, [session])
 
-  // não logado
   if (!session) {
     return <Login />
   }
 
-  // logado mas profile ainda carregando
   if (!profile) {
     return <p>Carregando perfil...</p>
   }
@@ -63,30 +60,23 @@ function App() {
           Bem-vindo, <strong>{profile.name}</strong> ({profile.role})
         </p>
 
-        <button onClick={() => supabase.auth.signOut()}>
-          Sair
-        </button>
+        <button onClick={() => supabase.auth.signOut()}>Sair</button>
       </header>
 
-      {/* Status geral da frota */}
       <FleetStatus />
 
-      {/* Relatórios inteligentes */}
       <SmartReport profile={profile} />
 
-      {/* Manutenção automática (somente chefia) */}
       <Maintenance profile={profile} />
 
-      {/* Registrar Saída */}
+      <VehicleConfig profile={profile} />
+
       <RegisterUsage user={session.user} />
 
-      {/* Registrar Chegada */}
       <RegisterReturn user={session.user} />
 
-      {/* Registrar Abastecimento */}
       <FuelLog user={session.user} profile={profile} />
 
-      {/* Lista de veículos */}
       <Vehicles />
     </div>
   )
