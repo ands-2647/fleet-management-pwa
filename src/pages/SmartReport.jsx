@@ -1,603 +1,280 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer
-} from 'recharts'
+
+const box = {
+  padding: 20,
+  border: '1px solid #ddd',
+  borderRadius: 10,
+  marginTop: 20
+}
 
 const card = {
   background: '#f4f4f4',
-  padding: 16,
+  padding: 14,
   borderRadius: 8,
   display: 'flex',
   justifyContent: 'space-between',
-  alignItems: 'center',
-  fontSize: 16
+  alignItems: 'center'
 }
 
-const alertBox = {
-  border: '1px solid #ffd18b',
-  background: '#fff7e6',
+const sectionBox = {
+  border: '1px solid #ddd',
   borderRadius: 10,
-  padding: 12
+  padding: 16,
+  marginTop: 18,
+  background: '#fff'
 }
 
-function isoDate(d) {
+const pill = (bg) => ({
+  background: bg,
+  color: '#111',
+  padding: '6px 10px',
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 700
+})
+
+function iso(d) {
   return new Date(d).toISOString().slice(0, 10)
 }
 
-function startOfMonthISO(date = new Date()) {
-  return isoDate(new Date(date.getFullYear(), date.getMonth(), 1))
+function firstDayOfMonth() {
+  const now = new Date()
+  return iso(new Date(now.getFullYear(), now.getMonth(), 1))
 }
 
-function endOfMonthISO(date = new Date()) {
-  return isoDate(new Date(date.getFullYear(), date.getMonth() + 1, 0))
+function shortLabel(plate, model) {
+  const m = (model || '').trim()
+  const mShort = m.length > 12 ? m.slice(0, 12) + '…' : m
+  return `${plate} — ${mShort}`
 }
 
-function hoursDiffFromNow(dateISO) {
-  const ms = Date.now() - new Date(dateISO).getTime()
-  return ms / 1000 / 60 / 60
-}
-
-function labelMedicao(measurementType) {
-  return measurementType === 'hours' ? 'Hora' : 'KM'
+function daysBetween(dateStrA, dateStrB) {
+  const a = new Date(dateStrA + 'T00:00:00')
+  const b = new Date(dateStrB + 'T00:00:00')
+  const diff = b.getTime() - a.getTime()
+  return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
 
 export default function SmartReport({ profile }) {
   const isManager = profile?.role !== 'motorista'
 
-  // Configuráveis
-  const OPEN_USAGE_ALERT_HOURS = 24
-  const HIGH_COST_THRESHOLD = 2.5 // R$ por KM/Hora
+  const [start, setStart] = useState(firstDayOfMonth())
+  const [end, setEnd] = useState(iso(new Date()))
 
-  const [rangeType, setRangeType] = useState('last_30') // last_7 | last_30 | month | custom
-  const [monthBase, setMonthBase] = useState(startOfMonthISO())
-  const [customStart, setCustomStart] = useState(
-    isoDate(new Date(Date.now() - 6 * 86400000))
-  )
-  const [customEnd, setCustomEnd] = useState(isoDate(new Date()))
+  const [vehicles, setVehicles] = useState([])
+  const [profiles, setProfiles] = useState([])
 
-  const [rows, setRows] = useState([])
-  const [openUsages, setOpenUsages] = useState([])
-  const [userRows, setUserRows] = useState([])
-  const [maintenanceRows, setMaintenanceRows] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [driverFuel, setDriverFuel] = useState([])
+  const [lastUse, setLastUse] = useState([])
+  const [maintStatus, setMaintStatus] = useState([])
 
-  const { start, end } = useMemo(() => {
-    const today = new Date()
-    if (rangeType === 'last_7') {
-      return {
-        start: isoDate(new Date(Date.now() - 6 * 86400000)),
-        end: isoDate(today)
-      }
-    }
-    if (rangeType === 'last_30') {
-      return {
-        start: isoDate(new Date(Date.now() - 29 * 86400000)),
-        end: isoDate(today)
-      }
-    }
-    if (rangeType === 'month') {
-      const base = new Date(monthBase)
-      return {
-        start: startOfMonthISO(base),
-        end: endOfMonthISO(base)
-      }
-    }
-    return { start: customStart, end: customEnd }
-  }, [rangeType, monthBase, customStart, customEnd])
+  const [idleDays, setIdleDays] = useState(15)
+
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (!isManager) return
-    fetchAll()
+    fetchBase()
+    fetchExtras()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [start, end, isManager])
+  }, [isManager])
 
-  async function fetchAll() {
+  async function fetchBase() {
     setLoading(true)
-    await Promise.all([
-      fetchDailyKpis(),
-      fetchOpenUsages(),
-      fetchUserKpis(),
-      fetchMaintenanceStatus()
+
+    const [vehRes, profRes] = await Promise.all([
+      supabase.from('vehicles').select('id, plate, model, measurement_type').order('plate'),
+      supabase.from('profiles').select('id, name')
     ])
+
     setLoading(false)
+
+    if (vehRes.error) console.error(vehRes.error)
+    if (profRes.error) console.error(profRes.error)
+
+    setVehicles(vehRes.data || [])
+    setProfiles(profRes.data || [])
   }
 
-  async function fetchDailyKpis() {
-    const { data, error } = await supabase
-      .from('v_vehicle_daily_kpis')
-      .select(
-        'vehicle_id, plate, model, type, measurement_type, day, fuel_spend, fuel_events, usage_total, trips_finished'
-      )
-      .gte('day', start)
-      .lte('day', end)
-      .order('day', { ascending: true })
+  async function fetchExtras() {
+    setLoading(true)
 
-    if (error) {
-      console.error('v_vehicle_daily_kpis error:', error)
-      setRows([])
-    } else {
-      setRows(data || [])
-    }
+    const [driverRes, lastUseRes, maintRes] = await Promise.all([
+      supabase
+        .from('v_driver_fuel_month')
+        .select('user_id, total_fuel_spend, fuel_events')
+        .order('total_fuel_spend', { ascending: false }),
+
+      supabase
+        .from('v_vehicle_last_use')
+        .select('vehicle_id, last_use_date'),
+
+      // ✅ aqui usamos a view nova baseada em KM/H
+      supabase
+        .from('v_vehicle_maintenance_status')
+        .select('vehicle_id, status, remaining, last_value, interval_value')
+    ])
+
+    setLoading(false)
+
+    if (driverRes.error) console.error(driverRes.error)
+    if (lastUseRes.error) console.error(lastUseRes.error)
+    if (maintRes.error) console.error(maintRes.error)
+
+    setDriverFuel(driverRes.data || [])
+    setLastUse(lastUseRes.data || [])
+    setMaintStatus(maintRes.data || [])
   }
 
-  async function fetchUserKpis() {
-    const { data, error } = await supabase
-      .from('v_user_daily_kpis')
-      .select(
-        'user_id, name, role, day, fuel_spend, fuel_events, usage_total, trips_finished'
-      )
-      .gte('day', start)
-      .lte('day', end)
-      .order('day', { ascending: true })
+  const vehicleById = useMemo(() => {
+    const map = {}
+    for (const v of vehicles) map[v.id] = v
+    return map
+  }, [vehicles])
 
-    if (error) {
-      console.error('v_user_daily_kpis error:', error)
-      setUserRows([])
-    } else {
-      setUserRows(data || [])
-    }
-  }
+  const profileNameById = useMemo(() => {
+    const map = {}
+    for (const p of profiles) map[p.id] = p.name
+    return map
+  }, [profiles])
 
-  async function fetchOpenUsages() {
-    const { data, error } = await supabase
-      .from('usage_logs')
-      .select(
-        'id, vehicle_id, user_id, date, start_value, created_at, destination, fuel_level_start'
-      )
-      .is('end_value', null)
-      .order('created_at', { ascending: false })
+  // ===== Veículos parados =====
+  const idleVehicles = useMemo(() => {
+    const today = iso(new Date())
 
-    if (error) {
-      console.error('open usage error:', error)
-      setOpenUsages([])
-      return
-    }
+    return (lastUse || [])
+      .map(x => {
+        const v = vehicleById[x.vehicle_id]
+        const label = v ? shortLabel(v.plate, v.model) : x.vehicle_id.slice(0, 8)
 
-    const open = data || []
-    const userIds = [...new Set(open.map(u => u.user_id).filter(Boolean))]
+        const last = x.last_use_date
+        const idle = last ? daysBetween(last, today) : 9999
 
-    let profilesMap = {}
-    if (userIds.length > 0) {
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('id, name, role')
-        .in('id', userIds)
+        return { vehicle_id: x.vehicle_id, label, last_use_date: last, idle_days: idle }
+      })
+      .filter(x => x.idle_days >= Number(idleDays))
+      .sort((a, b) => b.idle_days - a.idle_days)
+      .slice(0, 10)
+  }, [lastUse, vehicleById, idleDays])
 
-      if (profErr) {
-        console.error('profiles map error:', profErr)
-      } else {
-        profilesMap = Object.fromEntries((prof || []).map(p => [p.id, p]))
-      }
-    }
+  // ===== Manutenção (vencida/vencendo) =====
+  const maintList = useMemo(() => {
+    return (maintStatus || [])
+      .map(x => {
+        const v = vehicleById[x.vehicle_id]
+        const label = v ? shortLabel(v.plate, v.model) : x.vehicle_id.slice(0, 8)
+        return { ...x, label }
+      })
+      .filter(x => x.status === 'vencida' || x.status === 'vencendo')
+      .sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'vencida' ? -1 : 1
+        return Number(a.remaining || 0) - Number(b.remaining || 0)
+      })
+      .slice(0, 10)
+  }, [maintStatus, vehicleById])
 
-    setOpenUsages(
-      open.map(u => ({
-        ...u,
-        profile: profilesMap[u.user_id] || null
+  // ===== Top motoristas =====
+  const topDrivers = useMemo(() => {
+    return (driverFuel || [])
+      .slice(0, 5)
+      .map(x => ({
+        user_id: x.user_id,
+        name: profileNameById[x.user_id] || x.user_id.slice(0, 8),
+        gasto: Number(Number(x.total_fuel_spend || 0).toFixed(2)),
+        eventos: Number(x.fuel_events || 0)
       }))
-    )
-  }
+  }, [driverFuel, profileNameById])
 
-  async function fetchMaintenanceStatus() {
-    const { data, error } = await supabase
-      .from('v_maintenance_status')
-      .select(
-        'vehicle_id, plate, model, measurement_type, current_value, last_service_value, last_service_date, interval_value, remind_before, next_due_value, remaining, status'
-      )
-      .order('status', { ascending: true })
-      .order('remaining', { ascending: true })
-
-    if (error) {
-      console.error('v_maintenance_status error:', error)
-      setMaintenanceRows([])
-    } else {
-      setMaintenanceRows(data || [])
-    }
-  }
-
-  // --------- AGREGAÇÃO POR VEÍCULO (período) ----------
-  const byVehicle = useMemo(() => {
-    const map = new Map()
-    for (const r of rows) {
-      const key = r.vehicle_id
-      if (!map.has(key)) {
-        map.set(key, {
-          vehicle_id: r.vehicle_id,
-          plate: r.plate,
-          model: r.model,
-          type: r.type,
-          measurement_type: r.measurement_type,
-          fuel_spend: 0,
-          fuel_events: 0,
-          usage_total: 0,
-          trips_finished: 0
-        })
-      }
-      const agg = map.get(key)
-      agg.fuel_spend += Number(r.fuel_spend || 0)
-      agg.fuel_events += Number(r.fuel_events || 0)
-      agg.usage_total += Number(r.usage_total || 0)
-      agg.trips_finished += Number(r.trips_finished || 0)
-    }
-    return Array.from(map.values())
-  }, [rows])
-
-  // --------- AGREGAÇÃO POR USUÁRIO (período) ----------
-  const byUser = useMemo(() => {
-    const map = new Map()
-    for (const r of userRows) {
-      const key = r.user_id
-      if (!key) continue
-      if (!map.has(key)) {
-        map.set(key, {
-          user_id: r.user_id,
-          name: r.name || 'Usuário',
-          role: r.role || '—',
-          fuel_spend: 0,
-          fuel_events: 0,
-          usage_total: 0,
-          trips_finished: 0
-        })
-      }
-      const agg = map.get(key)
-      agg.fuel_spend += Number(r.fuel_spend || 0)
-      agg.fuel_events += Number(r.fuel_events || 0)
-      agg.usage_total += Number(r.usage_total || 0)
-      agg.trips_finished += Number(r.trips_finished || 0)
-    }
-    return Array.from(map.values())
-  }, [userRows])
-
-  const totals = useMemo(() => {
-    const fuel = byVehicle.reduce((acc, r) => acc + r.fuel_spend, 0)
-    const events = byVehicle.reduce((acc, r) => acc + r.fuel_events, 0)
-    const usage = byVehicle.reduce((acc, r) => acc + r.usage_total, 0)
-    const trips = byVehicle.reduce((acc, r) => acc + r.trips_finished, 0)
-    const costPerUnit = usage > 0 ? fuel / usage : 0
-    return { fuel, events, usage, trips, costPerUnit }
-  }, [byVehicle])
-
-  // --------- TOP 5 ----------
-  const top5Fuel = useMemo(
-    () => [...byVehicle].sort((a, b) => b.fuel_spend - a.fuel_spend).slice(0, 5),
-    [byVehicle]
-  )
-
-  const top5Usage = useMemo(
-    () => [...byVehicle].sort((a, b) => b.usage_total - a.usage_total).slice(0, 5),
-    [byVehicle]
-  )
-
-  const top5DriversUsage = useMemo(
-    () => [...byUser].sort((a, b) => b.usage_total - a.usage_total).slice(0, 5),
-    [byUser]
-  )
-
-  const top5DriversFuel = useMemo(
-    () => [...byUser].sort((a, b) => b.fuel_spend - a.fuel_spend).slice(0, 5),
-    [byUser]
-  )
-
-  const top5DriversEvents = useMemo(
-    () => [...byUser].sort((a, b) => b.fuel_events - a.fuel_events).slice(0, 5),
-    [byUser]
-  )
-
-  // --------- ALERTAS GERAIS (uso/consumo/registro) ----------
-  const alerts = useMemo(() => {
-    const a = []
-
-    // Uso aberto há mais de X horas
-    for (const u of openUsages) {
-      const h = hoursDiffFromNow(u.created_at)
-      if (h >= OPEN_USAGE_ALERT_HOURS) {
-        const who = u.profile?.name ? `${u.profile.name}` : 'Usuário'
-        a.push({
-          type: 'Uso aberto',
-          message: `Uso aberto há ${Math.floor(h)}h. ${who} — saída ${u.start_value} em ${u.date}.`
-        })
-      }
-    }
-
-    // Abasteceu no período e não teve viagem finalizada
-    for (const v of byVehicle) {
-      if (v.fuel_events > 0 && v.trips_finished === 0) {
-        a.push({
-          type: 'Possível falta de registro',
-          message: `${v.plate}: abasteceu no período, mas 0 viagens finalizadas. Pode ter faltado registrar chegada.`
-        })
-      }
-    }
-
-    // Teve uso no período mas nenhum abastecimento
-    for (const v of byVehicle) {
-      if (v.trips_finished > 0 && v.fuel_events === 0) {
-        a.push({
-          type: 'Sem abastecimento',
-          message: `${v.plate}: teve uso no período, mas nenhum abastecimento registrado.`
-        })
-      }
-    }
-
-    // Custo alto (R$/KM ou R$/Hora)
-    for (const v of byVehicle) {
-      if (v.usage_total > 0) {
-        const cost = v.fuel_spend / v.usage_total
-        if (cost >= HIGH_COST_THRESHOLD) {
-          const unit = labelMedicao(v.measurement_type)
-          a.push({
-            type: 'Custo alto',
-            message: `${v.plate}: ${cost.toFixed(2)} R$/${unit} no período (>= ${HIGH_COST_THRESHOLD}).`
-          })
-        }
-      }
-    }
-
-    return a
-  }, [openUsages, byVehicle])
-
-  // --------- ALERTAS DE MANUTENÇÃO ----------
-  const maintenanceLate = useMemo(
-    () => maintenanceRows.filter(r => r.status === 'atrasado'),
-    [maintenanceRows]
-  )
-
-  const maintenanceSoon = useMemo(
-    () => maintenanceRows.filter(r => r.status === 'proximo'),
-    [maintenanceRows]
-  )
-
-  // --------- GRÁFICOS ----------
-  const chartFuel = useMemo(() => {
-    return [...byVehicle]
-      .sort((a, b) => b.fuel_spend - a.fuel_spend)
-      .map(r => ({ name: r.plate, gasto: Number(r.fuel_spend.toFixed(2)) }))
-  }, [byVehicle])
-
-  const chartUsage = useMemo(() => {
-    return [...byVehicle]
-      .sort((a, b) => b.usage_total - a.usage_total)
-      .map(r => ({ name: r.plate, uso: Number(r.usage_total.toFixed(2)) }))
-  }, [byVehicle])
-
-  if (!isManager) {
-    return (
-      <div style={{ padding: 20, border: '1px solid #ddd', borderRadius: 8 }}>
-        <h2>Relatórios</h2>
-        <p>Relatórios completos disponíveis apenas para gestor/gerente/diretor.</p>
-      </div>
-    )
-  }
+  if (!isManager) return null
 
   return (
-    <div style={{ padding: 20, border: '1px solid #ddd', borderRadius: 8 }}>
-      <h2>Relatórios inteligentes</h2>
+    <div style={box}>
+      <h2>Relatórios Inteligentes — Extras</h2>
 
-      <div style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
-        <label style={{ fontSize: 13, color: '#555' }}>Período</label>
+      <button onClick={fetchExtras} disabled={loading}>
+        {loading ? 'Atualizando...' : 'Atualizar dados'}
+      </button>
 
-        <select value={rangeType} onChange={e => setRangeType(e.target.value)}>
-          <option value="last_7">Últimos 7 dias</option>
-          <option value="last_30">Últimos 30 dias</option>
-          <option value="month">Mês (selecionar)</option>
-          <option value="custom">Personalizado</option>
-        </select>
-
-        {rangeType === 'month' && (
-          <>
-            <label style={{ fontSize: 13, color: '#555' }}>Escolha um dia do mês</label>
+      {/* VEÍCULOS PARADOS */}
+      <div style={sectionBox}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>Veículos parados</h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: '#555' }}>Parado há</span>
             <input
-              type="date"
-              value={monthBase}
-              onChange={e => setMonthBase(e.target.value)}
+              type="number"
+              value={idleDays}
+              onChange={e => setIdleDays(e.target.value)}
+              style={{ width: 70 }}
             />
-          </>
-        )}
+            <span style={{ fontSize: 13, color: '#555' }}>dias</span>
+          </div>
+        </div>
 
-        {rangeType === 'custom' && (
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr 1fr' }}>
-            <div>
-              <label style={{ fontSize: 13, color: '#555' }}>Início</label>
-              <input
-                type="date"
-                value={customStart}
-                onChange={e => setCustomStart(e.target.value)}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 13, color: '#555' }}>Fim</label>
-              <input
-                type="date"
-                value={customEnd}
-                onChange={e => setCustomEnd(e.target.value)}
-              />
-            </div>
+        {idleVehicles.length === 0 ? (
+          <p style={{ marginTop: 10 }}>Nenhum veículo parado acima do limite ✅</p>
+        ) : (
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {idleVehicles.map(v => (
+              <div key={v.vehicle_id} style={card}>
+                <strong>{v.label}</strong>
+                <span style={{ fontSize: 13, color: '#333' }}>
+                  {v.last_use_date ? `${v.idle_days} dias (último: ${v.last_use_date})` : 'Sem uso registrado'}
+                </span>
+              </div>
+            ))}
           </div>
         )}
-
-        <div style={{ fontSize: 13, color: '#555' }}>
-          Período ativo: <strong>{start}</strong> até <strong>{end}</strong>
-        </div>
       </div>
 
-      {loading ? (
-        <p style={{ marginTop: 12 }}>Carregando...</p>
-      ) : (
-        <>
-          {/* Cards resumo */}
-          <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
-            <div style={card}>
-              <strong>Gasto total combustível (R$)</strong>
-              <span>{totals.fuel.toFixed(2)}</span>
-            </div>
+      {/* MANUTENÇÃO */}
+      <div style={sectionBox}>
+        <h3 style={{ marginTop: 0 }}>Manutenções (vencidas / vencendo)</h3>
 
-            <div style={card}>
-              <strong>Abastecimentos no período</strong>
-              <span>{totals.events}</span>
-            </div>
+        {maintList.length === 0 ? (
+          <p>Sem manutenções críticas ✅</p>
+        ) : (
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {maintList.map(m => (
+              <div key={m.vehicle_id} style={card}>
+                <strong>{m.label}</strong>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={pill(m.status === 'vencida' ? '#ffd6d6' : '#fff2c2')}>
+                    {m.status.toUpperCase()}
+                  </span>
 
-            <div style={card}>
-              <strong>Uso total (KM/Horas)</strong>
-              <span>{totals.usage.toFixed(2)}</span>
-            </div>
-
-            <div style={card}>
-              <strong>Viagens finalizadas</strong>
-              <span>{totals.trips}</span>
-            </div>
-
-            <div style={card}>
-              <strong>Custo estimado (R$ por KM/Hora)</strong>
-              <span>{totals.usage > 0 ? totals.costPerUnit.toFixed(2) : '—'}</span>
-            </div>
-
-            <div style={card}>
-              <strong>Manutenção atrasada</strong>
-              <span>{maintenanceLate.length}</span>
-            </div>
-
-            <div style={card}>
-              <strong>Manutenção próxima</strong>
-              <span>{maintenanceSoon.length}</span>
-            </div>
-          </div>
-
-          {/* ALERTAS DE MANUTENÇÃO */}
-          <h3 style={{ marginTop: 24 }}>Alertas de manutenção</h3>
-
-          {maintenanceLate.length === 0 && maintenanceSoon.length === 0 ? (
-            <p>Nenhum alerta de manutenção ✅</p>
-          ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
-              {maintenanceLate.map(r => (
-                <div key={`late-${r.vehicle_id}`} style={alertBox}>
-                  <strong>Atrasado:</strong> {r.plate} — {r.model} •{' '}
-                  <strong>{Math.abs(Number(r.remaining).toFixed(0))}</strong>{' '}
-                  {labelMedicao(r.measurement_type)} atrasado.
-                </div>
-              ))}
-
-              {maintenanceSoon.map(r => (
-                <div key={`soon-${r.vehicle_id}`} style={alertBox}>
-                  <strong>Próximo:</strong> {r.plate} — {r.model} • faltam{' '}
-                  <strong>{Number(r.remaining).toFixed(0)}</strong>{' '}
-                  {labelMedicao(r.measurement_type)}.
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* TOP 5 veículos */}
-          <h3 style={{ marginTop: 24 }}>Top 5 veículos por gasto</h3>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {top5Fuel.map(v => (
-              <div key={v.vehicle_id} style={card}>
-                <strong>
-                  {v.plate} — {v.model}
-                </strong>
-                <span>R$ {v.fuel_spend.toFixed(2)}</span>
+                  <span style={{ fontSize: 13, color: '#333' }}>
+                    Faltam: <strong>{Number(m.remaining || 0).toFixed(0)}</strong> (meta: {Number(m.interval_value || 0).toFixed(0)})
+                  </span>
+                </span>
               </div>
             ))}
           </div>
+        )}
+      </div>
 
-          <h3 style={{ marginTop: 24 }}>Top 5 veículos por uso (KM/Horas)</h3>
-          <div style={{ display: 'grid', gap: 10 }}>
-            {top5Usage.map(v => (
-              <div key={v.vehicle_id} style={card}>
-                <strong>
-                  {v.plate} — {v.model}
-                </strong>
-                <span>{v.usage_total.toFixed(2)}</span>
+      {/* TOP MOTORISTAS */}
+      <div style={sectionBox}>
+        <h3 style={{ marginTop: 0 }}>Top motoristas — combustível (mês atual)</h3>
+
+        {topDrivers.length === 0 ? (
+          <p>Sem abastecimentos neste mês.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+            {topDrivers.map((d, idx) => (
+              <div key={d.user_id} style={card}>
+                <strong>{idx + 1}. {d.name}</strong>
+                <span>R$ {d.gasto.toFixed(2)} ({d.eventos}x)</span>
               </div>
             ))}
           </div>
+        )}
 
-          {/* TOP motoristas */}
-          <h3 style={{ marginTop: 24 }}>Top motoristas (período)</h3>
-          <div style={{ display: 'grid', gap: 10 }}>
-            <div style={alertBox}>
-              <strong>Top 5 por uso (KM/Horas)</strong>
-              <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
-                {top5DriversUsage.map(u => (
-                  <div key={u.user_id} style={card}>
-                    <strong>{u.name}</strong>
-                    <span>{u.usage_total.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={alertBox}>
-              <strong>Top 5 por gasto em combustível (R$)</strong>
-              <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
-                {top5DriversFuel.map(u => (
-                  <div key={u.user_id} style={card}>
-                    <strong>{u.name}</strong>
-                    <span>R$ {u.fuel_spend.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={alertBox}>
-              <strong>Top 5 por número de abastecimentos</strong>
-              <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
-                {top5DriversEvents.map(u => (
-                  <div key={u.user_id} style={card}>
-                    <strong>{u.name}</strong>
-                    <span>{u.fuel_events}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Alertas gerais */}
-          <h3 style={{ marginTop: 24 }}>Alertas gerais</h3>
-          {alerts.length === 0 ? (
-            <p>Nenhum alerta no momento ✅</p>
-          ) : (
-            <div style={{ display: 'grid', gap: 10 }}>
-              {alerts.map((a, idx) => (
-                <div key={idx} style={alertBox}>
-                  <strong>{a.type}:</strong> {a.message}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Gráficos */}
-          <h3 style={{ marginTop: 24 }}>Gasto por veículo</h3>
-          <div style={{ width: '100%', height: 260 }}>
-            <ResponsiveContainer>
-              <BarChart data={chartFuel}>
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="gasto" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <h3 style={{ marginTop: 24 }}>Uso por veículo (KM/Horas)</h3>
-          <div style={{ width: '100%', height: 260 }}>
-            <ResponsiveContainer>
-              <BarChart data={chartUsage}>
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="uso" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </>
-      )}
+        <p style={{ fontSize: 12, color: '#666', marginTop: 10 }}>
+          *Ranking baseado em <strong>fuel_logs</strong> do mês atual.
+        </p>
+      </div>
     </div>
   )
 }
