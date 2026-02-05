@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   BarChart,
@@ -9,15 +9,21 @@ import {
   ResponsiveContainer
 } from 'recharts'
 
+import Section from '../components/ui/Section'
+import Badge from '../components/ui/Badge'
+import Button from '../components/ui/Button'
 
-const card = {
-  background: '#f4f4f4',
-  padding: 16,
-  borderRadius: 8,
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  fontSize: 16
+function rowCardStyle() {
+  return {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    border: '1px solid var(--border)',
+    background: '#0C0D0F'
+  }
 }
 
 export default function Report() {
@@ -26,83 +32,166 @@ export default function Report() {
 
   useEffect(() => {
     fetchReport()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function fetchReport() {
+    setLoading(true)
+
     const { data, error } = await supabase
       .from('vehicles')
       .select('id, type, measurement_type')
 
     if (error) {
       console.error(error)
+      setVehicles([])
     } else {
-      setVehicles(data)
+      setVehicles(data || [])
     }
 
     setLoading(false)
   }
 
-  if (loading) {
-    return <p>Carregando relatório...</p>
-  }
-
   const total = vehicles.length
 
-  const byType = vehicles.reduce((acc, v) => {
-    acc[v.type] = (acc[v.type] || 0) + 1
-    return acc
-  }, {})
+  const byType = useMemo(() => {
+    return vehicles.reduce((acc, v) => {
+      const key = v.type || 'sem tipo'
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
+  }, [vehicles])
 
-  const byMeasurement = vehicles.reduce((acc, v) => {
-    acc[v.measurement_type] = (acc[v.measurement_type] || 0) + 1
-    return acc
-  }, {})
+  const byMeasurement = useMemo(() => {
+    return vehicles.reduce((acc, v) => {
+      const key = v.measurement_type || 'indefinido'
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
+  }, [vehicles])
 
-  const chartData = Object.entries(byType).map(([type, count]) => ({
-  name: type,
-  quantidade: count
-}))
+  const chartData = useMemo(() => {
+    return Object.entries(byType).map(([type, count]) => ({
+      name: type,
+      quantidade: count
+    }))
+  }, [byType])
 
+  const headerRight = (
+    <Button variant="ghost" onClick={fetchReport} disabled={loading}>
+      {loading ? 'Atualizando...' : 'Atualizar'}
+    </Button>
+  )
 
- return (
-  <div style={{ padding: 20 }}>
-    <h1>Relatório da Frota</h1>
+  if (loading) {
+    return (
+      <Section title="Relatório da Frota" right={headerRight}>
+        <p>Carregando relatório...</p>
+      </Section>
+    )
+  }
 
-    <div style={{ display: 'grid', gap: 12 }}>
-      <div style={card}>
-        <strong>Total de ativos</strong>
-        <span>{total}</span>
+  return (
+    <Section title="Relatório da Frota" right={headerRight}>
+      {/* 🔥 CARIMBO PARA PROVAR QUE É O ARQUIVO NOVO */}
+      <div style={{ marginBottom: 10 }}>
+        <Badge tone="brand">REPORT v2 (dark)</Badge>
       </div>
 
-      {Object.entries(byType).map(([type, count]) => (
-        <div key={type} style={card}>
-          <strong>{type}</strong>
-          <span>{count}</span>
+      <div style={{ display: 'grid', gap: 10 }}>
+        {/* Total */}
+        <div style={rowCardStyle()}>
+          <div style={{ display: 'grid', gap: 4 }}>
+            <strong>Total de ativos</strong>
+            <div className="small">Veículos cadastrados</div>
+          </div>
+          <Badge tone="brand">{total}</Badge>
         </div>
-      ))}
 
-      {Object.entries(byMeasurement).map(([m, count]) => (
-        <div key={m} style={card}>
-          <strong>
-            {m === 'km' ? 'Usam KM' : 'Usam Horas'}
-          </strong>
-          <span>{count}</span>
+        {/* Por tipo */}
+        <div className="hr" />
+        <h3 style={{ margin: 0 }}>Por tipo</h3>
+
+        {Object.entries(byType).length === 0 ? (
+          <div style={rowCardStyle()}>
+            <strong>Nenhum dado</strong>
+            <Badge tone="neutral">—</Badge>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {Object.entries(byType).map(([type, count]) => (
+              <div key={type} style={rowCardStyle()}>
+                <strong style={{ textTransform: 'capitalize' }}>{type}</strong>
+                <Badge tone="neutral">{count}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Por medição */}
+        <div className="hr" />
+        <h3 style={{ margin: 0 }}>Por medição</h3>
+
+        <div style={{ display: 'grid', gap: 8 }}>
+          {Object.entries(byMeasurement).map(([m, count]) => {
+            const label =
+              m === 'km'
+                ? 'Usam KM'
+                : m === 'hours'
+                ? 'Usam Horas'
+                : `Medição: ${m}`
+
+            return (
+              <div key={m} style={rowCardStyle()}>
+                <strong>{label}</strong>
+                <Badge tone="neutral">{count}</Badge>
+              </div>
+            )
+          })}
         </div>
-      ))}
-      <h2 style={{ marginTop: 30 }}>Distribuição por tipo</h2>
 
-<div style={{ width: '100%', height: 250 }}>
-  <ResponsiveContainer>
-    <BarChart data={chartData}>
-      <XAxis dataKey="name" />
-      <YAxis allowDecimals={false} />
-      <Tooltip />
-      <Bar dataKey="quantidade" />
-    </BarChart>
-  </ResponsiveContainer>
-</div>
+        {/* Gráfico */}
+        <div className="hr" />
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            gap: 10
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Distribuição por tipo</h3>
+          <span className="small">Barras</span>
+        </div>
 
-    </div>
-  </div>
-)
+        <div
+          style={{
+            width: '100%',
+            height: 260,
+            border: '1px solid var(--border)',
+            borderRadius: 12,
+            background: '#0C0D0F',
+            padding: 10
+          }}
+        >
+          <ResponsiveContainer>
+            <BarChart data={chartData}>
+              <XAxis dataKey="name" tick={{ fill: 'var(--muted)' }} />
+              <YAxis allowDecimals={false} tick={{ fill: 'var(--muted)' }} />
+              <Tooltip
+                contentStyle={{
+                  background: '#0C0D0F',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                  color: 'var(--text)'
+                }}
+                labelStyle={{ color: 'var(--muted)' }}
+              />
+              <Bar dataKey="quantidade" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </Section>
+  )
 }

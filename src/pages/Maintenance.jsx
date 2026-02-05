@@ -1,24 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-const box = {
-  padding: 16,
-  border: '1px solid #ddd',
-  borderRadius: 10
-}
-
-const card = {
-  background: '#f4f4f4',
-  padding: 12,
-  borderRadius: 8,
-  display: 'flex',
-  justifyContent: 'space-between',
-  alignItems: 'center',
-  gap: 10
-}
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
 
 function labelUnit(measurementType) {
   return measurementType === 'hours' ? 'Horas' : 'KM'
+}
+
+function statusToBadge(s) {
+  if (s === 'atrasado') return { tone: 'danger', label: 'ATRASADO' }
+  if (s === 'proximo') return { tone: 'warn', label: 'VENCENDO' }
+  if (s === 'ok') return { tone: 'ok', label: 'OK' }
+  return { tone: 'neutral', label: 'INATIVO' }
 }
 
 export default function Maintenance({ profile }) {
@@ -27,6 +22,7 @@ export default function Maintenance({ profile }) {
   const [vehicles, setVehicles] = useState([])
   const [statusRows, setStatusRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   // formulário: criar/atualizar plano
   const [vehicleId, setVehicleId] = useState('')
@@ -38,7 +34,6 @@ export default function Maintenance({ profile }) {
   const [serviceVehicleId, setServiceVehicleId] = useState('')
   const [serviceValue, setServiceValue] = useState('')
   const [serviceNotes, setServiceNotes] = useState('')
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!isManager) return
@@ -67,6 +62,7 @@ export default function Maintenance({ profile }) {
   }
 
   async function fetchStatus() {
+    // Observação: esta view já existe no seu banco (v_maintenance_status)
     const { data, error } = await supabase
       .from('v_maintenance_status')
       .select(
@@ -110,7 +106,6 @@ export default function Maintenance({ profile }) {
       active: true
     }
 
-    // upsert: se já existir plano do veículo, atualiza
     const { error } = await supabase
       .from('maintenance_plans')
       .upsert(payload, { onConflict: 'vehicle_id' })
@@ -165,62 +160,51 @@ export default function Maintenance({ profile }) {
     fetchStatus()
   }
 
-  function statusLabel(s) {
-    if (s === 'atrasado') return 'Atrasado'
-    if (s === 'proximo') return 'Próximo'
-    if (s === 'ok') return 'OK'
-    return 'Inativo'
-  }
-
-  function statusStyle(s) {
-    if (s === 'atrasado') return { background: '#ffe0e0' }
-    if (s === 'proximo') return { background: '#fff3d6' }
-    if (s === 'ok') return { background: '#e7ffe7' }
-    return { background: '#efefef' }
-  }
-
-  if (!isManager) {
-    return (
-      <div style={box}>
-        <h2>Manutenção</h2>
-        <p>Somente gestor/gerente/diretor pode ver planos e alertas de manutenção.</p>
-      </div>
-    )
-  }
+  if (!isManager) return null
 
   return (
-    <div style={box}>
-      <h2>Manutenção automática</h2>
-
+    <Card
+      title="Manutenção"
+      right={
+        <Button variant="ghost" onClick={fetchAll} disabled={loading || saving}>
+          {loading ? 'Carregando...' : 'Atualizar'}
+        </Button>
+      }
+    >
       {loading ? (
-        <p>Carregando...</p>
+        <p>Carregando status de manutenção...</p>
       ) : (
-        <>
-          {/* Resumo de status */}
-          <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+        <div className="grid">
+          {/* Lista de alertas */}
+          <div className="grid">
             {statusRows.length === 0 ? (
               <p>Você ainda não criou nenhum plano de manutenção.</p>
             ) : (
               statusRows.map(r => {
                 const unit = labelUnit(r.measurement_type)
+                const b = statusToBadge(r.status)
                 return (
-                  <div key={r.vehicle_id} style={{ ...card, ...statusStyle(r.status) }}>
-                    <div>
-                      <strong>{r.plate}</strong> — {r.model}
-                      <div style={{ fontSize: 13, color: '#555', marginTop: 4 }}>
-                        Atual: <strong>{Number(r.current_value).toFixed(0)}</strong> {unit} •
-                        Próxima: <strong>{Number(r.next_due_value).toFixed(0)}</strong> {unit} •
-                        Restante: <strong>{Number(r.remaining).toFixed(0)}</strong> {unit}
+                  <div
+                    key={r.vehicle_id}
+                    className="card"
+                    style={{ boxShadow: 'none' }}
+                  >
+                    <div className="card-body" style={{ display: 'grid', gap: 8 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                        <div>
+                          <strong>{r.plate}</strong> — {r.model}
+                          <div className="small">
+                            Atual: <strong style={{ color: 'var(--text)' }}>{Number(r.current_value || 0).toFixed(0)}</strong> {unit} • Próxima: <strong style={{ color: 'var(--text)' }}>{Number(r.next_due_value || 0).toFixed(0)}</strong> {unit}
+                          </div>
+                        </div>
+                        <Badge tone={b.tone}>{b.label}</Badge>
                       </div>
-                      <div style={{ fontSize: 13, color: '#555', marginTop: 2 }}>
-                        Última manutenção: {r.last_service_date || '—'} (valor: {Number(r.last_service_value).toFixed(0)} {unit})
-                      </div>
-                    </div>
 
-                    <div style={{ textAlign: 'right' }}>
-                      <div><strong>{statusLabel(r.status)}</strong></div>
-                      <div style={{ fontSize: 12, color: '#555' }}>
-                        Intervalo: {Number(r.interval_value).toFixed(0)} {unit}
+                      <div className="small">
+                        Restante: <strong style={{ color: 'var(--text)' }}>{Number(r.remaining || 0).toFixed(0)}</strong> {unit} • Intervalo: {Number(r.interval_value || 0).toFixed(0)} {unit}
+                      </div>
+                      <div className="small">
+                        Última manutenção: {r.last_service_date || '—'} (valor: {Number(r.last_service_value || 0).toFixed(0)} {unit})
                       </div>
                     </div>
                   </div>
@@ -229,83 +213,92 @@ export default function Maintenance({ profile }) {
             )}
           </div>
 
-          <hr style={{ margin: '18px 0' }} />
+          <div className="hr" />
 
-          {/* Criar/Atualizar Plano */}
-          <h3>Criar/Atualizar plano por veículo</h3>
-          <form onSubmit={savePlan} style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
-            <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
-              <option value="">Selecione o veículo</option>
-              {vehicles.map(v => (
-                <option key={v.id} value={v.id}>
-                  {v.plate} — {v.model}
-                </option>
-              ))}
-            </select>
+          <div className="grid-2">
+            {/* Criar/Atualizar Plano */}
+            <div className="card" style={{ boxShadow: 'none' }}>
+              <div className="card-body">
+                <h3>Plano por veículo</h3>
+                <p className="small">Crie ou atualize o intervalo de manutenção do veículo.</p>
 
-            <input
-              type="number"
-              placeholder={`Intervalo (${selectedVehicle ? labelUnit(selectedVehicle.measurement_type) : 'KM/Horas'})`}
-              value={intervalValue}
-              onChange={e => setIntervalValue(e.target.value)}
-            />
+                <form onSubmit={savePlan} className="grid">
+                  <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
+                    <option value="">Selecione o veículo</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.plate} — {v.model}
+                      </option>
+                    ))}
+                  </select>
 
-            <input
-              type="number"
-              placeholder={`Avisar antes de (opcional)`}
-              value={remindBefore}
-              onChange={e => setRemindBefore(e.target.value)}
-            />
+                  <input
+                    type="number"
+                    placeholder={`Intervalo (${selectedVehicle ? labelUnit(selectedVehicle.measurement_type) : 'KM/Horas'})`}
+                    value={intervalValue}
+                    onChange={e => setIntervalValue(e.target.value)}
+                  />
 
-            <input
-              type="text"
-              placeholder="Observação (opcional)"
-              value={planNotes}
-              onChange={e => setPlanNotes(e.target.value)}
-            />
+                  <input
+                    type="number"
+                    placeholder="Avisar antes (opcional)"
+                    value={remindBefore}
+                    onChange={e => setRemindBefore(e.target.value)}
+                  />
 
-            <button type="submit" disabled={saving}>
-              {saving ? 'Salvando...' : 'Salvar plano'}
-            </button>
-          </form>
+                  <input
+                    type="text"
+                    placeholder="Observações do plano (opcional)"
+                    value={planNotes}
+                    onChange={e => setPlanNotes(e.target.value)}
+                  />
 
-          <hr style={{ margin: '18px 0' }} />
+                  <Button type="submit" disabled={saving} style={{ width: '100%' }}>
+                    {saving ? 'Salvando...' : 'Salvar plano'}
+                  </Button>
+                </form>
+              </div>
+            </div>
 
-          {/* Registrar manutenção feita */}
-          <h3>Registrar manutenção feita</h3>
-          <form onSubmit={registerService} style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
-            <select
-              value={serviceVehicleId}
-              onChange={e => setServiceVehicleId(e.target.value)}
-            >
-              <option value="">Selecione o veículo</option>
-              {vehicles.map(v => (
-                <option key={v.id} value={v.id}>
-                  {v.plate} — {v.model}
-                </option>
-              ))}
-            </select>
+            {/* Registrar manutenção feita */}
+            <div className="card" style={{ boxShadow: 'none' }}>
+              <div className="card-body">
+                <h3>Registrar manutenção feita</h3>
+                <p className="small">Após a manutenção, informe o KM/Horas em que ela foi executada.</p>
 
-            <input
-              type="number"
-              placeholder={`Valor no momento (${selectedServiceVehicle ? labelUnit(selectedServiceVehicle.measurement_type) : 'KM/Horas'})`}
-              value={serviceValue}
-              onChange={e => setServiceValue(e.target.value)}
-            />
+                <form onSubmit={registerService} className="grid">
+                  <select value={serviceVehicleId} onChange={e => setServiceVehicleId(e.target.value)}>
+                    <option value="">Selecione o veículo</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.plate} — {v.model}
+                      </option>
+                    ))}
+                  </select>
 
-            <input
-              type="text"
-              placeholder="Observação (opcional)"
-              value={serviceNotes}
-              onChange={e => setServiceNotes(e.target.value)}
-            />
+                  <input
+                    type="number"
+                    placeholder={`Valor (${selectedServiceVehicle ? labelUnit(selectedServiceVehicle.measurement_type) : 'KM/Horas'})`}
+                    value={serviceValue}
+                    onChange={e => setServiceValue(e.target.value)}
+                  />
 
-            <button type="submit" disabled={saving}>
-              {saving ? 'Registrando...' : 'Registrar manutenção'}
-            </button>
-          </form>
-        </>
+                  <input
+                    type="text"
+                    placeholder="Observações (opcional)"
+                    value={serviceNotes}
+                    onChange={e => setServiceNotes(e.target.value)}
+                  />
+
+                  <Button type="submit" disabled={saving} style={{ width: '100%' }}>
+                    {saving ? 'Registrando...' : 'Registrar manutenção'}
+                  </Button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+    </Card>
   )
 }

@@ -1,48 +1,53 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import Card from '../components/ui/Card'
-import Button from '../components/ui/Button'
-import Badge from '../components/ui/Badge'
+
+// Labels (UI) -> values (DB)
+const ROLE_OPTIONS = [
+  { value: 'gestor', label: 'Administrador' },
+  { value: 'diretor', label: 'Diretor' },
+  { value: 'gerente', label: 'Gerente' },
+  { value: 'motorista', label: 'Motorista' }
+]
 
 function roleLabel(role) {
-  if (role === 'gestor') return 'Gestor da Frota'
-  if (role === 'diretor') return 'Diretor'
-  if (role === 'gerente') return 'Gerente'
-  if (role === 'motorista') return 'Motorista'
-  return role
+  return ROLE_OPTIONS.find(r => r.value === role)?.label || role
 }
 
-function allowedCreateRoles(creatorRole) {
-  if (creatorRole === 'gestor') return ['diretor', 'gerente', 'motorista']
-  if (creatorRole === 'diretor' || creatorRole === 'gerente') return ['motorista']
-  return []
-}
+export default function Users({ profile }) {
+  const isFleetAdmin = profile?.role === 'gestor'
+  const canSee = profile?.role !== 'motorista'
 
-export default function Users({ session, profile }) {
-  const creatorRole = profile?.role
-  const canManage = creatorRole && creatorRole !== 'motorista'
-
-  const [list, setList] = useState([])
   const [loading, setLoading] = useState(false)
+  const [profiles, setProfiles] = useState([])
 
-  // criar
+  // create form
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('motorista')
+  const [role, setRole] = useState(isFleetAdmin ? 'motorista' : 'motorista')
 
-  // editar
-  const [editing, setEditing] = useState({}) // { [id]: { name, role } }
+  // edit
+  const [editing, setEditing] = useState(null) // {id, name, role}
 
-  const createRoles = useMemo(() => allowedCreateRoles(creatorRole), [creatorRole])
+  const allowedCreateRoles = useMemo(() => {
+    // Gestor da frota (você) cria qualquer um.
+    if (isFleetAdmin) return ['gestor', 'diretor', 'gerente', 'motorista']
+    // Diretor/Gerente: só motorista.
+    return ['motorista']
+  }, [isFleetAdmin])
+
+  const allowedEditRoles = useMemo(() => {
+    if (isFleetAdmin) return ['gestor', 'diretor', 'gerente', 'motorista']
+    return ['motorista']
+  }, [isFleetAdmin])
 
   useEffect(() => {
-    if (!canManage) return
-    refresh()
+    if (!canSee) return
+    fetchProfiles()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManage])
+  }, [canSee])
 
-  async function refresh() {
+  async function fetchProfiles() {
     setLoading(true)
     const { data, error } = await supabase
       .from('profiles')
@@ -52,261 +57,239 @@ export default function Users({ session, profile }) {
     setLoading(false)
     if (error) {
       console.error(error)
-      alert('Erro ao buscar usuários')
+      alert(error.message || 'Erro ao buscar usuários')
       return
     }
-    setList(data || [])
+
+    const list = data || []
+    // Diretor/Gerente só enxerga motoristas (pra não “bagunçar”)
+    setProfiles(isFleetAdmin ? list : list.filter(p => p.role === 'motorista'))
   }
 
   async function handleCreate(e) {
     e.preventDefault()
-    if (!name || !email || !password || !role) {
-      alert('Preencha nome, email, senha e cargo.')
+
+    if (!name || !email || !password) {
+      alert('Preencha nome, e-mail e senha')
+      return
+    }
+
+    if (!allowedCreateRoles.includes(role)) {
+      alert('Você não tem permissão para criar esse cargo.')
       return
     }
 
     setLoading(true)
-    try {
-      const res = await fetch('/api/create-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({ name, email, password, role })
-      })
 
-      const payload = await res.json().catch(() => ({}))
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
 
-      if (!res.ok || payload?.error) {
-        alert(payload?.error || 'Erro ao criar usuário')
-      } else {
-        alert('Usuário criado com sucesso ✅')
-        setName('')
-        setEmail('')
-        setPassword('')
-        setRole('motorista')
-        await refresh()
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function canEditRow(row) {
-    if (creatorRole === 'gestor') return true
-    if (creatorRole === 'diretor' || creatorRole === 'gerente') {
-      return row.role === 'motorista'
-    }
-    return false
-  }
-
-  function roleOptionsForRow(row) {
-    // diretor/gerente não podem trocar cargo; gestor pode trocar (exceto o próprio)
-    if (creatorRole === 'gestor') {
-      if (row.id === session.user.id) return [row.role] // trava seu próprio cargo
-      return ['diretor', 'gerente', 'motorista']
-    }
-    return [row.role]
-  }
-
-  function startEdit(row) {
-    setEditing(prev => ({
-      ...prev,
-      [row.id]: { name: row.name || '', role: row.role || 'motorista' }
-    }))
-  }
-
-  function cancelEdit(id) {
-    setEditing(prev => {
-      const copy = { ...prev }
-      delete copy[id]
-      return copy
+    const res = await fetch('/api/create-user', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ name, email, password, role })
     })
+
+    setLoading(false)
+
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      console.error('CREATE USER ERROR:', payload)
+      alert(payload?.error || 'Erro ao criar usuário')
+      return
+    }
+
+    alert('Usuário criado com sucesso ✅')
+    setName('')
+    setEmail('')
+    setPassword('')
+    setRole(isFleetAdmin ? 'motorista' : 'motorista')
+    fetchProfiles()
   }
 
-  async function saveEdit(id) {
-    const patch = editing[id]
-    if (!patch) return
+  function startEdit(p) {
+    setEditing({ id: p.id, name: p.name || '', role: p.role })
+  }
+
+  async function saveEdit() {
+    if (!editing) return
+    if (!editing.name) {
+      alert('Informe o nome')
+      return
+    }
+    if (!allowedEditRoles.includes(editing.role)) {
+      alert('Você não tem permissão para alterar para esse cargo.')
+      return
+    }
 
     setLoading(true)
-    try {
-      const res = await fetch('/api/update-profile', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({ id, name: patch.name, role: patch.role })
-      })
-      const payload = await res.json().catch(() => ({}))
-      if (!res.ok || payload?.error) {
-        alert(payload?.error || 'Erro ao atualizar usuário')
-      } else {
-        cancelEdit(id)
-        await refresh()
-      }
-    } finally {
-      setLoading(false)
+
+    const { data: sessionData } = await supabase.auth.getSession()
+    const token = sessionData?.session?.access_token
+
+    const res = await fetch('/api/update-profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify({ id: editing.id, name: editing.name, role: editing.role })
+    })
+
+    setLoading(false)
+    const payload = await res.json().catch(() => ({}))
+
+    if (!res.ok) {
+      console.error('UPDATE PROFILE ERROR:', payload)
+      alert(payload?.error || 'Erro ao atualizar usuário')
+      return
     }
+
+    alert('Usuário atualizado ✅')
+    setEditing(null)
+    fetchProfiles()
   }
 
-  if (!canManage) return null
+  if (!canSee) {
+    return (
+      <div className="card">
+        <h2>Usuários</h2>
+        <p className="muted">Acesso restrito.</p>
+      </div>
+    )
+  }
 
   return (
-    <Card
-      title="Usuários"
-      right={
-        <Button variant="ghost" onClick={refresh} disabled={loading}>
-          {loading ? 'Atualizando…' : 'Atualizar'}
-        </Button>
-      }
-    >
-      {/* CRIAR */}
-      <div style={{ marginBottom: 14 }}>
-        <h4 style={{ marginTop: 0, marginBottom: 8 }}>Criar usuário</h4>
+    <div className="grid">
+      <div className="card">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <h2 style={{ margin: 0 }}>Usuários</h2>
+          <button className="btn" onClick={fetchProfiles} disabled={loading}>
+            {loading ? 'Atualizando…' : 'Atualizar'}
+          </button>
+        </div>
+        <p className="muted" style={{ marginTop: 6 }}>
+          {isFleetAdmin
+            ? 'Administrador: cria e edita qualquer usuário.'
+            : 'Diretor/Gerente: cria e edita apenas Motoristas.'}
+        </p>
+      </div>
 
-        {createRoles.length === 0 ? (
-          <p style={{ opacity: 0.8, margin: 0 }}>
-            Você não tem permissão para criar usuários.
-          </p>
-        ) : (
-          <form onSubmit={handleCreate} style={{ display: 'grid', gap: 10 }}>
-            <input
-              placeholder="Nome"
-              value={name}
-              onChange={e => setName(e.target.value)}
-            />
-            <input
-              placeholder="Email"
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-            />
-            <input
-              placeholder="Senha"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
+      {/* Criar */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Cadastrar usuário</h3>
 
-            <select value={role} onChange={e => setRole(e.target.value)}>
-              {createRoles.map(r => (
-                <option key={r} value={r}>
-                  {roleLabel(r)}
+        <form onSubmit={handleCreate} className="grid" style={{ gap: 10 }}>
+          <input
+            className="input"
+            placeholder="Nome"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+
+          <input
+            className="input"
+            placeholder="E-mail"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+
+          <input
+            className="input"
+            type="password"
+            placeholder="Senha"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+          />
+
+          {/* Cargo */}
+          {isFleetAdmin ? (
+            <select className="select" value={role} onChange={e => setRole(e.target.value)}>
+              {ROLE_OPTIONS.filter(r => allowedCreateRoles.includes(r.value)).map(r => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
                 </option>
               ))}
             </select>
+          ) : (
+            <div className="badge badge-ok">Cargo: Motorista</div>
+          )}
 
-            <Button type="submit" disabled={loading}>
-              {loading ? 'Criando…' : 'Criar usuário'}
-            </Button>
-          </form>
+          <button className="btn btn-primary" type="submit" disabled={loading}>
+            {loading ? 'Salvando…' : 'Criar usuário'}
+          </button>
+        </form>
+      </div>
+
+      {/* Lista */}
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Lista</h3>
+        {profiles.length === 0 ? (
+          <p className="muted">Nenhum usuário encontrado.</p>
+        ) : (
+          <div className="grid" style={{ gap: 10 }}>
+            {profiles.map(p => (
+              <div key={p.id} className="card" style={{ padding: 14 }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <strong>{p.name || p.id.slice(0, 8)}</strong>
+                  <span className="badge">{roleLabel(p.role)}</span>
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  ID: {p.id.slice(0, 8)}…
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <button className="btn" onClick={() => startEdit(p)}>
+                    Editar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      <div className="sep" style={{ margin: '14px 0' }} />
+      {/* Modal simples de edição */}
+      {editing && (
+        <div className="card" style={{ borderColor: 'rgba(255,255,255,.18)' }}>
+          <h3 style={{ marginTop: 0 }}>Editar usuário</h3>
 
-      {/* LISTA */}
-      <h4 style={{ marginTop: 0, marginBottom: 8 }}>Lista</h4>
-      {list.length === 0 ? (
-        <p style={{ opacity: 0.8, margin: 0 }}>
-          Nenhum usuário encontrado.
-        </p>
-      ) : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          {list.map(u => {
-            const isEditing = Boolean(editing[u.id])
-            const editable = canEditRow(u)
-            const opts = roleOptionsForRow(u)
+          <div className="grid" style={{ gap: 10 }}>
+            <input
+              className="input"
+              value={editing.name}
+              onChange={e => setEditing({ ...editing, name: e.target.value })}
+            />
 
-            return (
-              <div key={u.id} className="soft" style={{ padding: 12 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 12
-                  }}
-                >
-                  <div style={{ display: 'grid', gap: 4 }}>
-                    <strong style={{ fontSize: 16 }}>{u.name || '(sem nome)'}</strong>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <Badge tone={u.role === 'motorista' ? 'neutral' : 'warning'}>
-                        {roleLabel(u.role)}
-                      </Badge>
-                      {u.id === session.user.id && (
-                        <Badge tone="success">você</Badge>
-                      )}
-                      <span style={{ opacity: 0.7, fontSize: 12 }}>
-                        {u.id.slice(0, 8)}…
-                      </span>
-                    </div>
-                  </div>
+            {isFleetAdmin ? (
+              <select
+                className="select"
+                value={editing.role}
+                onChange={e => setEditing({ ...editing, role: e.target.value })}
+              >
+                {ROLE_OPTIONS.filter(r => allowedEditRoles.includes(r.value)).map(r => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="badge badge-ok">Cargo: Motorista</div>
+            )}
 
-                  {editable && !isEditing && (
-                    <Button variant="ghost" onClick={() => startEdit(u)}>
-                      Editar
-                    </Button>
-                  )}
-                </div>
-
-                {editable && isEditing && (
-                  <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
-                    <input
-                      placeholder="Nome"
-                      value={editing[u.id].name}
-                      onChange={e =>
-                        setEditing(prev => ({
-                          ...prev,
-                          [u.id]: { ...prev[u.id], name: e.target.value }
-                        }))
-                      }
-                    />
-
-                    <select
-                      value={editing[u.id].role}
-                      onChange={e =>
-                        setEditing(prev => ({
-                          ...prev,
-                          [u.id]: { ...prev[u.id], role: e.target.value }
-                        }))
-                      }
-                      disabled={opts.length === 1}
-                    >
-                      {opts.map(r => (
-                        <option key={r} value={r}>
-                          {roleLabel(r)}
-                        </option>
-                      ))}
-                    </select>
-
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      <Button onClick={() => saveEdit(u.id)} disabled={loading}>
-                        Salvar
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => cancelEdit(u.id)}
-                        disabled={loading}
-                      >
-                        Cancelar
-                      </Button>
-                    </div>
-
-                    {(creatorRole === 'diretor' || creatorRole === 'gerente') && (
-                      <p style={{ margin: 0, fontSize: 12, opacity: 0.75 }}>
-                        *Diretor/Gerente pode editar somente motoristas (sem trocar o cargo).
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn" onClick={() => setEditing(null)}>
+                Cancelar
+              </button>
+              <button className="btn btn-primary" onClick={saveEdit} disabled={loading}>
+                {loading ? 'Salvando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </Card>
+    </div>
   )
 }

@@ -20,9 +20,14 @@
   --gap: 12px;
 
   --font: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+
+  /* 🔥 altura do menu inferior (ajuste aqui se quiser) */
+  --bottom-nav-h: 86px;
 }
 
 *{ box-sizing: border-box; }
+
+html, body { height: 100%; }
 
 body{
   margin:0;
@@ -44,6 +49,9 @@ p{ margin: 0 0 10px; color: var(--muted); }
   max-width: 980px;
   margin: 0 auto;
   padding: 18px;
+
+  /* ✅ ESSA É A CORREÇÃO PRINCIPAL: espaço pro BottomNav */
+  padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 14px);
 }
 
 .hr{
@@ -88,7 +96,6 @@ input:focus, select:focus, textarea:focus{
   box-shadow: 0 0 0 3px rgba(255,106,0,.12);
 }
 
-/* base button (fallback) */
 button{
   cursor: pointer;
   border: 1px solid var(--border);
@@ -103,7 +110,6 @@ button:disabled{
   cursor: not-allowed;
 }
 
-/* cards */
 .card{
   background: var(--card);
   border: 1px solid var(--border);

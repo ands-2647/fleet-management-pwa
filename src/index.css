@@ -1,4 +1,3 @@
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-}
+/* Mantido só para reset mínimo.
+   O tema principal está em src/theme.css */
+body { margin: 0; }

@@ -9,13 +9,16 @@ import RegisterReturn from './pages/RegisterReturn'
 import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
+import Maintenance from './pages/Maintenance'
 import Users from './pages/Users'
 
 import AppHeader from './components/AppHeader'
+import BottomNav from './components/BottomNav'
 
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
+  const [tab, setTab] = useState('status')
 
   // sessão inicial + escuta login/logout
   useEffect(() => {
@@ -26,6 +29,7 @@ function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       setProfile(null)
+      setTab('status')
     })
 
     return () => {
@@ -53,31 +57,61 @@ function App() {
   // logado mas profile ainda carregando
   if (!profile) return <p className="container">Carregando perfil...</p>
 
+  const isManager = profile.role !== 'motorista'
+
+  const navItems = [
+    { key: 'status', label: 'Status', icon: '🚦' },
+    { key: 'uso', label: 'Uso', icon: '🚗' },
+    { key: 'abastecer', label: 'Comb.', icon: '⛽' },
+    ...(isManager ? [{ key: 'gestao', label: 'Gestão', icon: '📊' }] : []),
+    ...(isManager ? [{ key: 'usuarios', label: 'Usuários', icon: '👤' }] : []),
+    { key: 'veiculos', label: 'Frota', icon: '🧰' }
+  ]
+
   return (
-    <div className="container">
+    <div className="container safe-bottom">
       <AppHeader profile={profile} onSignOut={() => supabase.auth.signOut()} />
 
-      <div className="grid">
-        <FleetStatus />
+      {tab === 'status' && (
+        <div className="grid">
+          <FleetStatus />
+          {isManager && <Maintenance profile={profile} />}
+        </div>
+      )}
 
-        <div className="grid-2">
+      {tab === 'uso' && (
+        <div className="grid grid-2">
           <RegisterUsage user={session.user} />
           <RegisterReturn user={session.user} />
         </div>
+      )}
 
-        <FuelLog user={session.user} profile={profile} />
+      {tab === 'abastecer' && (
+        <div className="grid">
+          <FuelLog user={session.user} profile={profile} />
+        </div>
+      )}
 
-        {/* Painel do gestor */}
-        {profile.role !== 'motorista' && <SmartReport profile={profile} />}
-        {profile.role !== 'motorista' && <Report />}
+      {tab === 'gestao' && isManager && (
+        <div className="grid">
+          <SmartReport profile={profile} />
+          <Report />
+        </div>
+      )}
 
-        {/* Usuários (cadastro/edição) */}
-        {profile.role !== 'motorista' && (
-          <Users session={session} profile={profile} />
-        )}
+      {tab === 'usuarios' && isManager && (
+        <div className="grid">
+          <Users profile={profile} />
+        </div>
+      )}
 
-        <Vehicles />
-      </div>
+      {tab === 'veiculos' && (
+        <div className="grid">
+          <Vehicles />
+        </div>
+      )}
+
+      <BottomNav items={navItems} activeKey={tab} onChange={setTab} />
     </div>
   )
 }

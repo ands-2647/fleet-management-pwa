@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
+
+function labelUnit(measurementType) {
+  return measurementType === 'hours' ? 'Horas' : 'KM'
+}
 
 export default function RegisterReturn({ user }) {
   const [vehicles, setVehicles] = useState([])
@@ -41,15 +49,18 @@ export default function RegisterReturn({ user }) {
     if (!error) setOpenUsage(data?.[0] ?? null)
   }
 
-  const selectedVehicle = vehicles.find(v => v.id === vehicleId)
-  const labelMedicao =
-    selectedVehicle?.measurement_type === 'hours' ? 'Horas' : 'KM'
+  const selectedVehicle = useMemo(
+    () => vehicles.find(v => v.id === vehicleId),
+    [vehicles, vehicleId]
+  )
+
+  const unit = labelUnit(selectedVehicle?.measurement_type)
 
   async function handleSubmit(e) {
     e.preventDefault()
 
     if (!vehicleId || !endValue) {
-      alert('Preencha todos os campos')
+      alert('Preencha os campos obrigatórios')
       return
     }
 
@@ -66,22 +77,29 @@ export default function RegisterReturn({ user }) {
     if (error) {
       console.error('RPC ERROR:', error)
       alert(error.message || 'Erro ao registrar chegada')
-    } else {
-      alert('Chegada registrada ✅')
-      setEndValue('')
-      fetchOpenUsage(vehicleId) // deve ficar null agora
+      return
     }
+
+    alert('Chegada registrada ✅')
+    setEndValue('')
+    fetchOpenUsage(vehicleId)
   }
 
   return (
-    <div style={{ padding: 20, border: '1px solid #ddd', borderRadius: 8, marginTop: 12 }}>
-      <h2>Registrar Chegada</h2>
-
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 10 }}>
-        <select
-          value={vehicleId}
-          onChange={e => setVehicleId(e.target.value)}
+    <Card
+      title="Registrar chegada"
+      right={
+        <Button
+          variant="ghost"
+          onClick={() => vehicleId && fetchOpenUsage(vehicleId)}
+          disabled={!vehicleId || loading}
         >
+          Atualizar
+        </Button>
+      }
+    >
+      <form onSubmit={handleSubmit} className="grid">
+        <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
           <option value="">Selecione o veículo</option>
           {vehicles.map(v => (
             <option key={v.id} value={v.id}>
@@ -90,34 +108,42 @@ export default function RegisterReturn({ user }) {
           ))}
         </select>
 
-        {!openUsage && vehicleId && (
-          <div style={{ background: '#eaf7ea', padding: 10, borderRadius: 6 }}>
-            Não há uso aberto para este veículo.
+        {vehicleId && !openUsage && (
+          <div className="card" style={{ boxShadow: 'none' }}>
+            <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>Sem uso aberto</strong>
+              <Badge tone="neutral">N/A</Badge>
+            </div>
           </div>
         )}
 
         {openUsage && (
-          <div style={{ background: '#fff7d6', padding: 10, borderRadius: 6 }}>
-            Uso aberto encontrado ✅
-            <div>
-              Saída: <strong>{openUsage.start_value}</strong> ({labelMedicao})
+          <div className="card" style={{ boxShadow: 'none', borderColor: 'rgba(255,204,0,.35)' }}>
+            <div className="card-body" style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Uso aberto encontrado</strong>
+                <Badge tone="warn">ABERTO</Badge>
+              </div>
+              <div className="small">
+                Saída: <strong style={{ color: 'var(--text)' }}>{openUsage.start_value}</strong> {unit}
+              </div>
+              <div className="small">Data: {openUsage.date}</div>
             </div>
-            <div>Data: {openUsage.date}</div>
           </div>
         )}
 
         <input
           type="number"
-          placeholder={`Informe ${labelMedicao} de chegada`}
+          placeholder={`Leitura de chegada (${unit})`}
           value={endValue}
           onChange={e => setEndValue(e.target.value)}
           disabled={!openUsage}
         />
 
-        <button type="submit" disabled={loading || !openUsage}>
-          {loading ? 'Salvando...' : 'Registrar Chegada'}
-        </button>
+        <Button type="submit" disabled={loading || !openUsage} style={{ width: '100%' }}>
+          {loading ? 'Salvando...' : 'Registrar chegada'}
+        </Button>
       </form>
-    </div>
+    </Card>
   )
 }

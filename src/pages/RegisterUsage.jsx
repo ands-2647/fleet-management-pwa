@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Badge from '../components/ui/Badge'
+
+function labelUnit(measurementType) {
+  return measurementType === 'hours' ? 'Horas' : 'KM'
+}
 
 export default function RegisterUsage({ user }) {
   const [vehicles, setVehicles] = useState([])
@@ -23,7 +31,6 @@ export default function RegisterUsage({ user }) {
     if (!error) setVehicles(data || [])
   }
 
-  // quando escolher veículo, buscar uso aberto
   useEffect(() => {
     if (!vehicleId) {
       setOpenUsage(null)
@@ -44,13 +51,14 @@ export default function RegisterUsage({ user }) {
     if (!error) setOpenUsage(data?.[0] ?? null)
   }
 
-  const selectedVehicle = vehicles.find(v => v.id === vehicleId)
-  const labelMedicao =
-    selectedVehicle?.measurement_type === 'hours' ? 'Horas' : 'KM'
+  const selectedVehicle = useMemo(
+    () => vehicles.find(v => v.id === vehicleId),
+    [vehicles, vehicleId]
+  )
 
+  const unit = labelUnit(selectedVehicle?.measurement_type)
   const previousValue = openUsage?.start_value ?? null
-  const isInvalid =
-    previousValue !== null && Number(startValue) <= Number(previousValue)
+  const isInvalid = previousValue !== null && Number(startValue) <= Number(previousValue)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -61,9 +69,7 @@ export default function RegisterUsage({ user }) {
     }
 
     if (isInvalid) {
-      alert(
-        `O valor informado precisa ser maior que o anterior (${previousValue}).`
-      )
+      alert(`O valor informado precisa ser maior que o anterior (${previousValue}).`)
       return
     }
 
@@ -83,24 +89,27 @@ export default function RegisterUsage({ user }) {
     if (error) {
       console.error('RPC ERROR:', error)
       alert(error.message || 'Erro ao registrar saída')
-    } else {
-      alert('Saída registrada com sucesso 🚗')
-      setStartValue('')
-      setDestination('')
-      setFuelLevel('')
-      fetchOpenUsage(vehicleId)
+      return
     }
+
+    alert('Saída registrada com sucesso 🚗')
+    setStartValue('')
+    setDestination('')
+    setFuelLevel('')
+    fetchOpenUsage(vehicleId)
   }
 
   return (
-    <div style={{ padding: 20, border: '1px solid #ddd', borderRadius: 8 }}>
-      <h2>Registrar Saída</h2>
-
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 10 }}>
-        <select
-          value={vehicleId}
-          onChange={e => setVehicleId(e.target.value)}
-        >
+    <Card
+      title="Registrar saída"
+      right={
+        <Button variant="ghost" onClick={() => vehicleId && fetchOpenUsage(vehicleId)} disabled={!vehicleId || loading}>
+          Atualizar
+        </Button>
+      }
+    >
+      <form onSubmit={handleSubmit} className="grid">
+        <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
           <option value="">Selecione o veículo</option>
           {vehicles.map(v => (
             <option key={v.id} value={v.id}>
@@ -109,19 +118,31 @@ export default function RegisterUsage({ user }) {
           ))}
         </select>
 
-        {openUsage && (
-          <div style={{ background: '#fff7d6', padding: 10, borderRadius: 6 }}>
-            <strong>Atenção:</strong> existe um uso aberto deste veículo.
-            <div>
-              Valor anterior: <strong>{openUsage.start_value}</strong> ({labelMedicao})
+        {openUsage ? (
+          <div className="card" style={{ boxShadow: 'none', borderColor: 'rgba(255,204,0,.35)' }}>
+            <div className="card-body" style={{ display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Uso aberto detectado</strong>
+                <Badge tone="warn">ATENÇÃO</Badge>
+              </div>
+              <div className="small">
+                Valor anterior: <strong style={{ color: 'var(--text)' }}>{openUsage.start_value}</strong> {unit}
+              </div>
+              <div className="small">Data: {openUsage.date}</div>
             </div>
-            <div>Data: {openUsage.date}</div>
+          </div>
+        ) : (
+          <div className="card" style={{ boxShadow: 'none' }}>
+            <div className="card-body" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>Sem uso aberto</strong>
+              <Badge tone="ok">OK</Badge>
+            </div>
           </div>
         )}
 
         <input
           type="number"
-          placeholder={`Informe ${labelMedicao} atuais`}
+          placeholder={`Leitura atual (${unit})`}
           value={startValue}
           onChange={e => setStartValue(e.target.value)}
         />
@@ -133,11 +154,8 @@ export default function RegisterUsage({ user }) {
           onChange={e => setDestination(e.target.value)}
         />
 
-        <select
-          value={fuelLevel}
-          onChange={e => setFuelLevel(e.target.value)}
-        >
-          <option value="">Nível de combustível</option>
+        <select value={fuelLevel} onChange={e => setFuelLevel(e.target.value)}>
+          <option value="">Nível de combustível (opcional)</option>
           <option value="vazio">Vazio</option>
           <option value="1/4">1/4</option>
           <option value="1/2">1/2</option>
@@ -145,10 +163,10 @@ export default function RegisterUsage({ user }) {
           <option value="cheio">Cheio</option>
         </select>
 
-        <button type="submit" disabled={loading || !vehicleId}>
-          {loading ? 'Registrando...' : 'Registrar Saída'}
-        </button>
+        <Button type="submit" disabled={loading || !vehicleId} style={{ width: '100%' }}>
+          {loading ? 'Registrando...' : 'Registrar saída'}
+        </Button>
       </form>
-    </div>
+    </Card>
   )
 }
