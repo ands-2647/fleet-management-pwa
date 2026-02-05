@@ -9,28 +9,31 @@ import RegisterReturn from './pages/RegisterReturn'
 import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
+import Users from './pages/Users'
+
+import AppHeader from './components/AppHeader'
 
 function App() {
   const [session, setSession] = useState(null)
   const [profile, setProfile] = useState(null)
 
+  // sessão inicial + escuta login/logout
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session)
-        setProfile(null)
-      }
-    )
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+      setProfile(null)
+    })
 
     return () => {
       listener.subscription.unsubscribe()
     }
   }, [])
 
+  // buscar profile após login
   useEffect(() => {
     if (session?.user) {
       supabase
@@ -44,32 +47,37 @@ function App() {
     }
   }, [session])
 
+  // não logado
   if (!session) return <Login />
-  if (!profile) return <p>Carregando perfil...</p>
+
+  // logado mas profile ainda carregando
+  if (!profile) return <p className="container">Carregando perfil...</p>
 
   return (
-    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
-      <header style={{ marginBottom: 20 }}>
-        <p>
-          Bem-vindo, <strong>{profile.name}</strong>
-        </p>
-        <button onClick={() => supabase.auth.signOut()}>Sair</button>
-      </header>
+    <div className="container">
+      <AppHeader profile={profile} onSignOut={() => supabase.auth.signOut()} />
 
-      <FleetStatus />
+      <div className="grid">
+        <FleetStatus />
 
-      <RegisterUsage user={session.user} />
-      <RegisterReturn user={session.user} />
+        <div className="grid-2">
+          <RegisterUsage user={session.user} />
+          <RegisterReturn user={session.user} />
+        </div>
 
-      <FuelLog user={session.user} profile={profile} />
+        <FuelLog user={session.user} profile={profile} />
 
-      {/* ✅ Relatórios Inteligentes (chefia) */}
-      {profile.role !== 'motorista' && <SmartReport profile={profile} />}
+        {/* Painel do gestor */}
+        {profile.role !== 'motorista' && <SmartReport profile={profile} />}
+        {profile.role !== 'motorista' && <Report />}
 
-      {/* Relatório simples antigo (chefia) */}
-      {profile.role !== 'motorista' && <Report />}
+        {/* Usuários (cadastro/edição) */}
+        {profile.role !== 'motorista' && (
+          <Users session={session} profile={profile} />
+        )}
 
-      <Vehicles />
+        <Vehicles />
+      </div>
     </div>
   )
 }

@@ -1,5 +1,8 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import Button from '../components/ui/Button'
+import Card from '../components/ui/Card'
+import logo from '../assets/logo.PNG'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -10,48 +13,67 @@ export default function Login() {
     e.preventDefault()
     setLoading(true)
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      password,
+      password
     })
 
     if (error) {
       alert(error.message)
       console.error(error)
-    } else {
-      console.log('Logado com sucesso:', data)
     }
 
     setLoading(false)
   }
 
   return (
-    <form onSubmit={handleLogin} style={{ padding: 20 }}>
-      <h2>Login</h2>
+    <div className="container" style={{ minHeight: 'calc(100vh - 36px)', display: 'grid', placeItems: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 420 }}>
+        <Card
+          title="Acesso ao sistema"
+          right={
+            <img
+              src={logo}
+              alt="MS"
+              style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid var(--border)', background: '#0C0D0F', objectFit: 'cover' }}
+            />
+          }
+        >
+          <form onSubmit={handleLogin} className="grid">
+            <div>
+              <div className="small" style={{ marginBottom: 6 }}>Email</div>
+              <input
+                type="email"
+                placeholder="seu@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-      <input
-        type="email"
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-      />
+            <div>
+              <div className="small" style={{ marginBottom: 6 }}>Senha</div>
+              <input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
 
-      <br /><br />
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Entrando...' : 'Entrar'}
+              </Button>
+            </div>
 
-      <input
-        type="password"
-        placeholder="Senha"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-      />
-
-      <br /><br />
-
-      <button type="submit" disabled={loading}>
-        {loading ? 'Entrando...' : 'Entrar'}
-      </button>
-    </form>
+            <div className="small">
+              Dica: depois de logar, o app fica conectado. Só saia quando necessário.
+            </div>
+          </form>
+        </Card>
+      </div>
+    </div>
   )
 }

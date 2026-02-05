@@ -1,0 +1,121 @@
+:root{
+  --bg: #0F0F10;
+  --panel: #121316;
+  --card: #17181C;
+  --border: #2A2C31;
+
+  --text: #FFFFFF;
+  --muted: #B7BAC2;
+
+  --brand: #FF6A00;
+  --brand-hover: #FF7F1A;
+
+  --danger: #FF3B30;
+  --warn: #FFCC00;
+  --ok: #34C759;
+
+  --radius: 14px;
+  --shadow: 0 10px 28px rgba(0,0,0,.40);
+  --pad: 16px;
+  --gap: 12px;
+
+  --font: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+*{ box-sizing: border-box; }
+
+body{
+  margin:0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+a{ color: inherit; text-decoration: none; }
+
+h1,h2,h3{
+  margin: 0 0 10px;
+  letter-spacing: .2px;
+}
+
+p{ margin: 0 0 10px; color: var(--muted); }
+
+.container{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.hr{
+  height: 1px;
+  background: var(--border);
+  margin: 14px 0;
+  border: 0;
+}
+
+.grid{
+  display: grid;
+  gap: var(--gap);
+}
+
+.grid-2{
+  display:grid;
+  gap: var(--gap);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 860px){
+  .grid-2{ grid-template-columns: 1fr 1fr; }
+}
+
+/* inputs */
+input, select, textarea{
+  width: 100%;
+  padding: 12px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #0C0D0F;
+  color: var(--text);
+  outline: none;
+}
+
+input::placeholder, textarea::placeholder{
+  color: #7D818C;
+}
+
+input:focus, select:focus, textarea:focus{
+  border-color: rgba(255,106,0,.65);
+  box-shadow: 0 0 0 3px rgba(255,106,0,.12);
+}
+
+/* base button (fallback) */
+button{
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #0C0D0F;
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+button:disabled{
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+/* cards */
+.card{
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card-body{
+  padding: var(--pad);
+}
+
+.small{
+  font-size: 12px;
+  color: var(--muted);
+}
