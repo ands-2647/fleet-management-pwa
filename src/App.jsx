@@ -56,6 +56,38 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id])
 
+  // -------------------------------------------------------------
+  // ✅ Regras de Hooks (React)
+  // Todos os hooks precisam ser chamados SEMPRE na mesma ordem.
+  // Por isso, qualquer useEffect/useState deve ficar ANTES dos
+  // returns condicionais (ex: if (!session) return ...).
+  // -------------------------------------------------------------
+
+  const isDriver = profile?.role === 'motorista'
+  const canManageFleet = !!profile && !isDriver // admin/diretor/gerente
+
+  // itens do menu (aba)
+  const items = [
+    { key: 'status', label: 'Status', icon: '📋' },
+    { key: 'uso', label: 'Uso', icon: '🚗' },
+    { key: 'comb', label: 'Combustível', icon: '⛽' },
+    // Gestão só aparece para quem NÃO é motorista
+    !isDriver ? { key: 'gestao', label: 'Gestão', icon: '📊' } : null,
+    // Frota (cadastro de veículos) só para admin/diretor/gerente
+    canManageFleet ? { key: 'frota', label: 'Frota', icon: '🚙' } : null
+  ].filter(Boolean)
+
+  // se a aba salva não existir mais (por role), cai pra status
+  useEffect(() => {
+    // só valida quando já carregou o profile
+    if (!profile?.role) return
+
+    if (!items.find(i => i.key === activeTab)) {
+      setActiveTab('status')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.role])
+
   // não logado
   if (!session) {
     return <Login />
@@ -65,26 +97,6 @@ function App() {
   if (!profile) {
     return <p style={{ padding: 20 }}>Carregando perfil...</p>
   }
-
-  const isDriver = profile.role === 'motorista'
-  const canManageFleet = !isDriver // admin/diretor/gerente
-
-  // itens do menu (aba)
-  const items = [
-    { key: 'status', label: 'Status', icon: '📋' },
-    { key: 'uso', label: 'Uso', icon: '🚗' },
-    { key: 'comb', label: 'Combustível', icon: '⛽' },
-    !isDriver ? { key: 'gestao', label: 'Gestão', icon: '📊' } : null,
-    canManageFleet ? { key: 'frota', label: 'Frota', icon: '🚙' } : null
-  ].filter(Boolean)
-
-  // se a aba salva não existir mais (por role), cai pra status
-  useEffect(() => {
-    if (!items.find(i => i.key === activeTab)) {
-      setActiveTab('status')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.role])
 
   return (
     <div className="app-shell">
