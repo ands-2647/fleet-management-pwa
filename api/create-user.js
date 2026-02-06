@@ -1,31 +1,22 @@
-// /api/create-user.js
-const { getAdminClient, getRequester } = require('./_supabaseAdmin')
+// api/create-user.js
+import { getAdminClient, getRequester } from './_supabaseAdmin.js'
 
 function send(res, status, body) {
-  // CORS básico (se estiver no mesmo domínio, não atrapalha)
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   return res.status(status).json(body)
 }
 
-module.exports = async (req, res) => {
-  // preflight
-  if (req.method === 'OPTIONS') {
-    return send(res, 200, { ok: true })
-  }
-
-  if (req.method !== 'POST') {
-    return send(res, 405, { error: 'Method not allowed' })
-  }
+export default async function handler(req, res) {
+  if (req.method === 'OPTIONS') return send(res, 200, { ok: true })
+  if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' })
 
   try {
     const admin = getAdminClient()
-    const { profile: requesterProfile } = await getRequester(req, admin)
 
-    if (!requesterProfile) {
-      return send(res, 401, { error: 'Unauthorized (missing/invalid token or profile)' })
-    }
+    const { profile: requesterProfile } = await getRequester(req, admin)
+    if (!requesterProfile) return send(res, 401, { error: 'Unauthorized' })
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
     const { email, password, name, role } = body || {}
@@ -36,7 +27,7 @@ module.exports = async (req, res) => {
 
     // Permissões:
     // - gestor: cria qualquer role
-    // - diretor/gerente: cria somente motorista
+    // - diretor/gerente: cria só motorista
     const requesterRole = requesterProfile.role
     const allowedRoles =
       requesterRole === 'gestor'
@@ -53,22 +44,14 @@ module.exports = async (req, res) => {
       email_confirm: true
     })
 
-    if (createErr) {
-      return send(res, 400, { error: createErr.message || 'Create user failed' })
-    }
-
+    if (createErr) return send(res, 400, { error: createErr.message || 'Create user failed' })
     const userId = created.user.id
 
     const { error: profErr } = await admin
       .from('profiles')
-      .upsert(
-        { id: userId, name, role },
-        { onConflict: 'id' }
-      )
+      .upsert({ id: userId, name, role }, { onConflict: 'id' })
 
-    if (profErr) {
-      return send(res, 400, { error: profErr.message || 'Profile insert failed' })
-    }
+    if (profErr) return send(res, 400, { error: profErr.message || 'Profile upsert failed' })
 
     return send(res, 200, { ok: true, userId })
   } catch (e) {

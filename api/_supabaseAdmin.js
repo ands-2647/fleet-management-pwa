@@ -1,62 +1,39 @@
-// /api/_supabaseAdmin.js
-const { createClient } = require('@supabase/supabase-js')
+// api/_supabaseAdmin.js
+import { createClient } from '@supabase/supabase-js'
 
-function getEnv(name) {
-  const v = process.env[name]
-  return v && String(v).trim() ? String(v).trim() : null
-}
+// IMPORTANT:
+// - SUPABASE_SERVICE_ROLE_KEY nunca vai pro front (somente server/Vercel)
+// - SUPABASE_URL é o Project URL do Supabase (o mesmo do VITE_SUPABASE_URL)
+export function getAdminClient() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-function getAdminClient() {
-  const supabaseUrl = getEnv('SUPABASE_URL') || getEnv('VITE_SUPABASE_URL')
-  const serviceRole = getEnv('SUPABASE_SERVICE_ROLE_KEY')
+  if (!supabaseUrl) throw new Error('Missing env: SUPABASE_URL (or VITE_SUPABASE_URL)')
+  if (!serviceKey) throw new Error('Missing env: SUPABASE_SERVICE_ROLE_KEY')
 
-  if (!supabaseUrl) {
-    throw new Error('Missing env: SUPABASE_URL (or VITE_SUPABASE_URL)')
-  }
-  if (!serviceRole) {
-    throw new Error('Missing env: SUPABASE_SERVICE_ROLE_KEY')
-  }
-
-  return createClient(supabaseUrl, serviceRole, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false
-    }
+  return createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false }
   })
 }
 
-async function getRequester(req, admin) {
-  const authHeader =
-    req.headers.authorization || req.headers.Authorization || ''
+// Lê o JWT do usuário logado via header Authorization: Bearer <token>
+// e carrega o profile (id, name, role) pra aplicar permissões
+export async function getRequester(req, admin) {
+  const authHeader = req.headers.authorization || req.headers.Authorization
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  if (!token) return { user: null, profile: null }
 
-  const token = String(authHeader).startsWith('Bearer ')
-    ? String(authHeader).slice('Bearer '.length)
-    : null
+  const { data, error } = await admin.auth.getUser(token)
+  if (error || !data?.user) return { user: null, profile: null }
 
-  if (!token) {
-    return { user: null, profile: null }
-  }
+  const user = data.user
 
-  // pega o usuário do token (JWT do supabase)
-  const { data: userData, error: userErr } = await admin.auth.getUser(token)
-  if (userErr || !userData?.user) {
-    return { user: null, profile: null }
-  }
-
-  const user = userData.user
-
-  // pega o profile com service role (não cai em RLS)
   const { data: profile, error: profErr } = await admin
     .from('profiles')
     .select('id, name, role')
     .eq('id', user.id)
     .single()
 
-  if (profErr) {
-    return { user, profile: null }
-  }
-
+  if (profErr) return { user, profile: null }
   return { user, profile }
 }
-
-module.exports = { getAdminClient, getRequester }
