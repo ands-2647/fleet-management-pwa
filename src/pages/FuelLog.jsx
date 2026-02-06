@@ -2,10 +2,36 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 const card = {
-  border: '1px solid #ddd',
-  borderRadius: 8,
+  border: '1px solid rgba(255,255,255,.10)',
+  borderRadius: 12,
   padding: 16,
-  marginTop: 12
+  marginTop: 12,
+  background: 'rgba(0,0,0,.35)',
+  overflow: 'hidden', // ✅ impede o date de vazar no iOS
+  width: '100%',
+  boxSizing: 'border-box'
+}
+
+const field = {
+  width: '100%',
+  boxSizing: 'border-box',
+  padding: 12,
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,.12)',
+  background: 'rgba(0,0,0,.35)',
+  color: '#fff',
+  outline: 'none'
+}
+
+const button = {
+  width: '100%',
+  padding: 12,
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,.10)',
+  background: '#ff6a00',
+  color: '#111',
+  fontWeight: 900,
+  cursor: 'pointer'
 }
 
 export default function FuelLog({ user, profile }) {
@@ -35,11 +61,10 @@ export default function FuelLog({ user, profile }) {
     } catch (_) {}
   }
 
-
-
   useEffect(() => {
     fetchVehicles()
     restoreDraft()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -51,15 +76,15 @@ export default function FuelLog({ user, profile }) {
     } catch (_) {}
   }, [draftKey, vehicleId, amount, tankFill, notes, date])
 
-
   useEffect(() => {
     fetchLogs()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function fetchVehicles() {
     const { data, error } = await supabase
       .from('vehicles')
-      .select('id, plate, model')
+      .select('id, plate, model, name')
       .order('plate')
 
     if (!error) setVehicles(data || [])
@@ -76,7 +101,6 @@ export default function FuelLog({ user, profile }) {
       .order('created_at', { ascending: false })
       .limit(20)
 
-    // motorista vê só o dele (policy já garante, mas ajuda a filtrar no client)
     if (!isManager) {
       query = query.eq('user_id', user.id)
     }
@@ -134,19 +158,23 @@ export default function FuelLog({ user, profile }) {
   const vehicleLabel = id => {
     const v = vehicles.find(x => x.id === id)
     if (!v) return id
-    return `${v.plate} — ${v.model}`
+    return `${v.plate} — ${(v.name || v.model || '').trim()}`
   }
 
   return (
     <div style={card}>
-      <h2>Registrar Abastecimento</h2>
+      <h2 style={{ marginTop: 0 }}>Registrar Abastecimento</h2>
 
       <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 10 }}>
-        <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
+        <select
+          value={vehicleId}
+          onChange={e => setVehicleId(e.target.value)}
+          style={field}
+        >
           <option value="">Selecione o veículo</option>
           {vehicles.map(v => (
             <option key={v.id} value={v.id}>
-              {v.plate} — {v.model}
+              {v.plate} — {(v.name || v.model || '').trim()}
             </option>
           ))}
         </select>
@@ -155,16 +183,22 @@ export default function FuelLog({ user, profile }) {
           type="date"
           value={date}
           onChange={e => setDate(e.target.value)}
+          style={field} // ✅ agora date usa o mesmo estilo (e não vaza)
         />
 
         <input
           type="number"
-          placeholder="Valor abastecido (R$)"
+          placeholder="Valor abastecido (R$) *"
           value={amount}
           onChange={e => setAmount(e.target.value)}
+          style={field}
         />
 
-        <select value={tankFill} onChange={e => setTankFill(e.target.value)}>
+        <select
+          value={tankFill}
+          onChange={e => setTankFill(e.target.value)}
+          style={field}
+        >
           <option value="parcial">Parcial</option>
           <option value="completo">Completo</option>
         </select>
@@ -174,23 +208,24 @@ export default function FuelLog({ user, profile }) {
           placeholder="Observação (opcional)"
           value={notes}
           onChange={e => setNotes(e.target.value)}
+          style={field}
         />
 
-        <button type="submit" disabled={loading}>
+        <button type="submit" disabled={loading} style={button}>
           {loading ? 'Salvando...' : 'Salvar Abastecimento'}
         </button>
       </form>
 
-      <hr style={{ margin: '16px 0' }} />
+      <hr style={{ margin: '16px 0', opacity: 0.2 }} />
 
-      <h3>Últimos abastecimentos</h3>
+      <h3 style={{ margin: 0 }}>Últimos abastecimentos</h3>
 
       {loadingLogs ? (
         <p>Carregando...</p>
       ) : logs.length === 0 ? (
         <p>Nenhum abastecimento registrado ainda.</p>
       ) : (
-        <ul style={{ display: 'grid', gap: 8, paddingLeft: 16 }}>
+        <ul style={{ display: 'grid', gap: 8, paddingLeft: 16, marginTop: 12 }}>
           {logs.map(l => (
             <li key={l.id}>
               <strong>{l.date}</strong> — {vehicleLabel(l.vehicle_id)} — R$ {l.amount}{' '}
