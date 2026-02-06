@@ -13,12 +13,34 @@ export default function RegisterReturn({ user }) {
   const [vehicles, setVehicles] = useState([])
   const [vehicleId, setVehicleId] = useState('')
   const [endValue, setEndValue] = useState('')
+
+  const draftKey = `draft_register_return::${user?.id || 'anon'}`
   const [openUsage, setOpenUsage] = useState(null)
   const [loading, setLoading] = useState(false)
 
+  function restoreDraft() {
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (!raw) return
+      const d = JSON.parse(raw)
+      if (d.vehicleId) setVehicleId(d.vehicleId)
+      if (d.endValue) setEndValue(d.endValue)
+    } catch (_) {}
+  }
+
+
+
   useEffect(() => {
     fetchVehicles()
+    restoreDraft()
   }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ vehicleId, endValue }))
+    } catch (_) {}
+  }, [draftKey, vehicleId, endValue])
+
 
   async function fetchVehicles() {
     const { data, error } = await supabase

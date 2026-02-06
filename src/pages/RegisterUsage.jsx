@@ -15,12 +15,39 @@ export default function RegisterUsage({ user }) {
   const [startValue, setStartValue] = useState('')
   const [destination, setDestination] = useState('')
   const [fuelLevel, setFuelLevel] = useState('')
+
+  const draftKey = `draft_register_usage::${user?.id || 'anon'}`
   const [openUsage, setOpenUsage] = useState(null)
   const [loading, setLoading] = useState(false)
 
+  function restoreDraft() {
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (!raw) return
+      const d = JSON.parse(raw)
+      if (d.vehicleId) setVehicleId(d.vehicleId)
+      if (d.startValue) setStartValue(d.startValue)
+      if (d.destination) setDestination(d.destination)
+      if (d.fuelLevel) setFuelLevel(d.fuelLevel)
+    } catch (_) {}
+  }
+
+
+
   useEffect(() => {
     fetchVehicles()
+    restoreDraft()
   }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        draftKey,
+        JSON.stringify({ vehicleId, startValue, destination, fuelLevel })
+      )
+    } catch (_) {}
+  }, [draftKey, vehicleId, startValue, destination, fuelLevel])
+
 
   async function fetchVehicles() {
     const { data, error } = await supabase

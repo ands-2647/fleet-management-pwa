@@ -125,3 +125,116 @@ button:disabled{
   font-size: 12px;
   color: var(--muted);
 }
+
+
+/* =========================
+   App shell + Bottom tabs
+   (evita botão sumir no mobile e mantém aba após recarregar)
+   ========================= */
+.app-shell{
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header{
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: linear-gradient(180deg, rgba(18,19,22,.96), rgba(18,19,22,.82));
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  padding: 14px var(--pad);
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+  gap: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.app-title{
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+
+.app-subtitle{
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.btn{
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.25);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.btn:hover{
+  border-color: rgba(255,255,255,.16);
+}
+
+.app-content{
+  flex: 1;
+  padding: var(--pad);
+  padding-bottom: calc(var(--bottom-nav-h) + 18px); /* ✅ espaço pro menu inferior */
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.bottom-nav{
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--bottom-nav-h);
+  z-index: 30;
+  background: linear-gradient(180deg, rgba(15,15,16,.20), rgba(15,15,16,.92));
+  border-top: 1px solid rgba(255,255,255,.06);
+  backdrop-filter: blur(10px);
+}
+
+.bottom-nav-inner{
+  height: 100%;
+  display: grid;
+  align-items: stretch;
+  gap: 0;
+  padding: 10px 10px 14px;
+}
+
+.nav-btn{
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  display:flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items:center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 14px;
+}
+
+.nav-btn .icon{
+  font-size: 18px;
+  line-height: 18px;
+}
+
+.nav-btn.active{
+  color: var(--text);
+  background: rgba(255,106,0,.14);
+  border: 1px solid rgba(255,106,0,.35);
+}
+
+.nav-btn:active{
+  transform: scale(.98);
+}
+
+
+.btn-primary{background: var(--brand); border-color: rgba(255,106,0,.45); color:#111; font-weight:900;}
+.btn-primary:hover{background: var(--brand-hover);} 

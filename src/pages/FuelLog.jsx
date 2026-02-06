@@ -15,14 +15,42 @@ export default function FuelLog({ user, profile }) {
   const [tankFill, setTankFill] = useState('parcial')
   const [notes, setNotes] = useState('')
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+
+  const draftKey = `draft_fuel_log::${user?.id || 'anon'}`
   const [loading, setLoading] = useState(false)
 
   const [logs, setLogs] = useState([])
   const [loadingLogs, setLoadingLogs] = useState(true)
 
+  function restoreDraft() {
+    try {
+      const raw = localStorage.getItem(draftKey)
+      if (!raw) return
+      const d = JSON.parse(raw)
+      if (d.vehicleId) setVehicleId(d.vehicleId)
+      if (d.amount) setAmount(d.amount)
+      if (d.tankFill) setTankFill(d.tankFill)
+      if (d.notes) setNotes(d.notes)
+      if (d.date) setDate(d.date)
+    } catch (_) {}
+  }
+
+
+
   useEffect(() => {
     fetchVehicles()
+    restoreDraft()
   }, [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        draftKey,
+        JSON.stringify({ vehicleId, amount, tankFill, notes, date })
+      )
+    } catch (_) {}
+  }, [draftKey, vehicleId, amount, tankFill, notes, date])
+
 
   useEffect(() => {
     fetchLogs()

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { supabase } from './lib/supabase'
+import { usePersistedState } from './lib/usePersistedState'
 
 import Login from './pages/Login'
 import Vehicles from './pages/Vehicles'
@@ -9,16 +10,16 @@ import RegisterReturn from './pages/RegisterReturn'
 import FuelLog from './pages/FuelLog'
 import FleetStatus from './pages/FleetStatus'
 import SmartReport from './pages/SmartReport'
-import Maintenance from './pages/Maintenance'
 import Users from './pages/Users'
 
-import AppHeader from './components/AppHeader'
 import BottomNav from './components/BottomNav'
 
 function App() {
-  const [session, setSession] = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [tab, setTab] = useState('status')
+  const [session, setSession] = usePersistedState('auth_session', null)
+  const [profile, setProfile] = usePersistedState('auth_profile', null)
+
+  // aba ativa (persiste para não “voltar pro início” quando iOS recarrega)
+  const [activeTab, setActiveTab] = usePersistedState('active_tab', 'status')
 
   // sessão inicial + escuta login/logout
   useEffect(() => {
@@ -26,15 +27,17 @@ function App() {
       setSession(data.session)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setProfile(null)
-      setTab('status')
-    })
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        setSession(nextSession)
+        setProfile(null)
+      }
+    )
 
     return () => {
       listener.subscription.unsubscribe()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // buscar profile após login
@@ -45,73 +48,83 @@ function App() {
         .select('*')
         .eq('id', session.user.id)
         .single()
-        .then(({ data }) => {
+        .then(({ data, error }) => {
+          if (error) console.error('PROFILE ERROR:', error)
           setProfile(data)
         })
     }
-  }, [session])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id])
 
   // não logado
-  if (!session) return <Login />
+  if (!session) {
+    return <Login />
+  }
 
   // logado mas profile ainda carregando
-  if (!profile) return <p className="container">Carregando perfil...</p>
+  if (!profile) {
+    return <p style={{ padding: 20 }}>Carregando perfil...</p>
+  }
 
-  const isManager = profile.role !== 'motorista'
+  const isDriver = profile.role === 'motorista'
+  const canManageFleet = !isDriver // admin/diretor/gerente
 
-  const navItems = [
-    { key: 'status', label: 'Status', icon: '🚦' },
+  // itens do menu (aba)
+  const items = [
+    { key: 'status', label: 'Status', icon: '📋' },
     { key: 'uso', label: 'Uso', icon: '🚗' },
-    { key: 'abastecer', label: 'Comb.', icon: '⛽' },
-    ...(isManager ? [{ key: 'gestao', label: 'Gestão', icon: '📊' }] : []),
-    ...(isManager ? [{ key: 'usuarios', label: 'Usuários', icon: '👤' }] : []),
-    { key: 'veiculos', label: 'Frota', icon: '🧰' }
-  ]
+    { key: 'comb', label: 'Combustível', icon: '⛽' },
+    !isDriver ? { key: 'gestao', label: 'Gestão', icon: '📊' } : null,
+    canManageFleet ? { key: 'frota', label: 'Frota', icon: '🚙' } : null
+  ].filter(Boolean)
+
+  // se a aba salva não existir mais (por role), cai pra status
+  useEffect(() => {
+    if (!items.find(i => i.key === activeTab)) {
+      setActiveTab('status')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.role])
 
   return (
-    <div className="container safe-bottom">
-      <AppHeader profile={profile} onSignOut={() => supabase.auth.signOut()} />
-
-      {tab === 'status' && (
-        <div className="grid">
-          <FleetStatus />
-          {isManager && <Maintenance profile={profile} />}
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="app-header-left">
+          <div className="app-title">Frota MS</div>
+          <div className="app-subtitle">
+            {profile.name} • {profile.role}
+          </div>
         </div>
-      )}
 
-      {tab === 'uso' && (
-        <div className="grid grid-2">
-          <RegisterUsage user={session.user} />
-          <RegisterReturn user={session.user} />
-        </div>
-      )}
+        <button className="btn" onClick={() => supabase.auth.signOut()}>
+          Sair
+        </button>
+      </header>
 
-      {tab === 'abastecer' && (
-        <div className="grid">
-          <FuelLog user={session.user} profile={profile} />
-        </div>
-      )}
+      <main className="app-content">
+        {activeTab === 'status' && <FleetStatus />}
 
-      {tab === 'gestao' && isManager && (
-        <div className="grid">
-          <SmartReport profile={profile} />
-          <Report />
-        </div>
-      )}
+        {activeTab === 'uso' && (
+          <>
+            <RegisterUsage user={session.user} />
+            <RegisterReturn user={session.user} />
+          </>
+        )}
 
-      {tab === 'usuarios' && isManager && (
-        <div className="grid">
-          <Users profile={profile} />
-        </div>
-      )}
+        {activeTab === 'comb' && <FuelLog user={session.user} profile={profile} />}
 
-      {tab === 'veiculos' && (
-        <div className="grid">
-          <Vehicles />
-        </div>
-      )}
+        {!isDriver && activeTab === 'gestao' && (
+          <>
+            <SmartReport profile={profile} />
+            <Report />
+            <Users profile={profile} />
+          </>
+        )}
 
-      <BottomNav items={navItems} activeKey={tab} onChange={setTab} />
+        {canManageFleet && activeTab === 'frota' && <Vehicles />}
+      </main>
+
+      <BottomNav items={items} activeKey={activeTab} onChange={setActiveTab} />
     </div>
   )
 }
